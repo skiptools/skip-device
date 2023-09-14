@@ -13,10 +13,10 @@ let package = Package(
         .package(url: "https://source.skip.tools/skip-foundation.git", from: "0.1.16"),
     ],
     targets: [
-    .target(name: "SkipDevice", dependencies: [.product(name: "SkipFoundation", package: "skip-foundation", condition: .when(platforms: [.macOS]))], plugins: [.plugin(name: "skipstone", package: "skip")]),
+    .target(name: "SkipDevice", dependencies: [.product(name: "SkipFoundation", package: "skip-foundation")], plugins: [.plugin(name: "skipstone", package: "skip")]),
     .testTarget(name: "SkipDeviceTests", dependencies: [
         "SkipDevice",
-        .product(name: "SkipTest", package: "skip", condition: .when(platforms: [.macOS]))
+        .product(name: "SkipTest", package: "skip")
     ], plugins: [.plugin(name: "skipstone", package: "skip")]),
     ]
 )
