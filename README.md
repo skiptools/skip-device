@@ -1,6 +1,53 @@
+# SkipDevice
 
 The SkipDevice module is a dual-platform Skip framework that provides access to 
-device sensor data.
+device sensor data such as network reachability and location.
+
+## Network Reachability
+
+You can check whether the device is currenly able to access the network with:
+
+```swift
+let isReachable: Bool = networkReachability.isNetworkReachable
+```
+
+### Permissions
+
+In order to access the device's photos or media library, you will need to 
+declare the permissions in the app's metadata.
+
+On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited to include:
+
+```
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+```
+
+## Location
+
+You can request the current device location with:
+
+```swift
+let provider = LocationProvider()
+let location: Location = try await provider.fetchCurrentLocation()
+logger.log("latitude: \(location.latitude) longitude: \(location.longitude)")
+```
+
+### Permissions
+
+In order to access the device's location, you will need to 
+declare the permissions in the app's metadata.
+
+On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited to include:
+
+```
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+```
+
+On iOS, you will need to add the `NSLocationWhenInUseUsageDescription`` key to your `Darwin/AppName.xcconfig` file:
+
+```
+INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to …"
+```
 
 ## Building
 
