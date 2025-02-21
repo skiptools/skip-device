@@ -43,7 +43,7 @@ On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited t
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
-On iOS, you will need to add the `NSLocationWhenInUseUsageDescription`` key to your `Darwin/AppName.xcconfig` file:
+On iOS, you will need to add the `NSLocationWhenInUseUsageDescription` key to your `Darwin/AppName.xcconfig` file:
 
 ```
 INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to …"
