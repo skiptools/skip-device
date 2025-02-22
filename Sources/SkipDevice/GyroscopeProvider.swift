@@ -69,7 +69,7 @@ public class GyroscopeProvider {
 
     // SKIP @nobridge // 'AsyncStream<GyroscopeEvent>' is not a bridged type
     public func monitor() -> AsyncStream<GyroscopeEvent> {
-        logger.debug("monitor")
+        logger.debug("starting gyroscope monitor")
         let (stream, continuation) = AsyncStream.makeStream(of: GyroscopeEvent.self)
 
         #if SKIP
@@ -97,7 +97,7 @@ public class GyroscopeProvider {
         #endif
 
         continuation.onTermination = { [weak self] _ in
-            logger.info("terminating")
+            logger.debug("cancelling gyroscope monitor")
             self?.stop()
         }
 

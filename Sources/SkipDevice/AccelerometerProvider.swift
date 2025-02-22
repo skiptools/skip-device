@@ -69,7 +69,7 @@ public class AccelerometerProvider {
 
     // SKIP @nobridge // 'AsyncStream<AccelerometerEvent>' is not a bridged type
     public func monitor() -> AsyncStream<AccelerometerEvent> {
-        logger.debug("monitor")
+        logger.debug("starting accelerometer monitor")
         let (stream, continuation) = AsyncStream.makeStream(of: AccelerometerEvent.self)
 
         #if SKIP
@@ -97,7 +97,7 @@ public class AccelerometerProvider {
         #endif
 
         continuation.onTermination = { [weak self] _ in
-            logger.info("terminating")
+            logger.debug("cancelling accelerometer monitor")
             self?.stop()
         }
 

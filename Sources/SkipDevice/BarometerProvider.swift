@@ -63,7 +63,7 @@ public class BarometerProvider {
 
     // SKIP @nobridge // 'AsyncStream<BarometerEvent>' is not a bridged type
     public func monitor() -> AsyncStream<BarometerEvent> {
-        logger.debug("monitor")
+        logger.debug("starting barometer monitor")
         let (stream, continuation) = AsyncStream.makeStream(of: BarometerEvent.self)
 
         #if SKIP
@@ -95,7 +95,7 @@ public class BarometerProvider {
         #endif
 
         continuation.onTermination = { [weak self] _ in
-            logger.info("terminating")
+            logger.debug("cancelling barometer monitor")
             self?.stop()
         }
 
