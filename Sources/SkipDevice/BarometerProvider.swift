@@ -16,15 +16,16 @@ import android.hardware.SensorManager
 import android.hardware.SensorEvent
 #endif
 
-private let logger: Logger = Logger(subsystem: "skip.device", category: "AccelerometerProvider") // adb logcat '*:S' 'skip.device.AccelerometerProvider:V'
+private let logger: Logger = Logger(subsystem: "skip.device", category: "BarometerProvider") // adb logcat '*:S' 'skip.device.BarometerProvider:V'
 
-/// A provider for device accelerometer events.
-public class AccelerometerProvider {
+/// A provider for device Barometer events.
+public class BarometerProvider {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private var listener: SensorEventHandler? = nil
+    private var referencePressure: Float? = nil
     #elseif os(iOS) || os(watchOS)
-    private let motionManager = CMMotionManager()
+    private let altimeter = CMAltimeter()
     #endif
 
     public init() {
@@ -33,24 +34,16 @@ public class AccelerometerProvider {
     deinit {
         stop()
     }
-    
-    /// Set the update interval for the accelerometer. Must be set before `monitor()` is invoked.
-    public var updateInterval: TimeInterval? {
-        didSet {
-            #if os(iOS) || os(watchOS)
-            if let interval = updateInterval {
-                motionManager.accelerometerUpdateInterval = interval
-            }
-            #endif
-        }
-    }
 
-    /// Returns `true` if the accelerometer is available on this device
+    /// Set the update interval for the magnetometer. Must be set before `monitor()` is invoked.
+    public var updateInterval: TimeInterval?
+
+    /// Returns `true` if the barometer is available on this device
     public var isAvailable: Bool {
         #if SKIP
-        return sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != nil
+        return sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE) != nil
         #elseif os(iOS) || os(watchOS)
-        return motionManager.isAccelerometerAvailable
+        return CMAltimeter.isRelativeAltitudeAvailable()
         #else
         return false // macOS, etc.
         #endif
@@ -61,21 +54,26 @@ public class AccelerometerProvider {
         if listener != nil {
             sensorManager.unregisterListener(listener)
             listener = nil
+            referencePressure = nil
         }
         #elseif os(iOS) || os(watchOS)
-        motionManager.stopAccelerometerUpdates()
+        altimeter.stopRelativeAltitudeUpdates()
         #endif
     }
 
-    // SKIP @nobridge // 'AsyncStream<AccelerometerEvent>' is not a bridged type
-    public func monitor() -> AsyncStream<AccelerometerEvent> {
+    // SKIP @nobridge // 'AsyncStream<BarometerEvent>' is not a bridged type
+    public func monitor() -> AsyncStream<BarometerEvent> {
         logger.debug("monitor")
-        let (stream, continuation) = AsyncStream.makeStream(of: AccelerometerEvent.self)
+        let (stream, continuation) = AsyncStream.makeStream(of: BarometerEvent.self)
 
         #if SKIP
-        if let sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) {
+        if let sensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE) {
             listener = SensorEventHandler(onSensorChangedCallback: { event in
-                continuation.yield(AccelerometerEvent(event: event))
+                if self.referencePressure == nil {
+                    // remember the initial reading so we can calculate relative altitiude
+                    self.referencePressure = event.values[0]
+                }
+                continuation.yield(BarometerEvent(event: event, referencePressure: referencePressure!))
             })
 
             // The rate sensor events are delivered at. This is only a hint to the system. Events may be received faster or slower than the specified rate. Usually events are received faster. The value must be one of SENSOR_DELAY_NORMAL, SENSOR_DELAY_UI, SENSOR_DELAY_GAME, or SENSOR_DELAY_FASTEST or, the desired delay between events in microseconds.
@@ -86,12 +84,12 @@ public class AccelerometerProvider {
             sensorManager.registerListener(listener, sensor, interval)
         }
         #elseif os(iOS) || os(watchOS)
-        motionManager.startAccelerometerUpdates(to: OperationQueue.main) { data, error in
+        altimeter.startRelativeAltitudeUpdates(to: OperationQueue.main) { data, error in
             if let error = error {
-                logger.debug("accelerometer update error: \(error)")
+                logger.debug("barometer update error: \(error)")
                 //continuation.finish(throwing: error) // would need to be AsyncThrowingStream
             } else if let data = data {
-                continuation.yield(AccelerometerEvent(data: data))
+                continuation.yield(BarometerEvent(data: data))
             }
         }
         #endif
@@ -105,32 +103,27 @@ public class AccelerometerProvider {
     }
 }
 
-/// A data sample from the device's three accelerometers.
-public struct AccelerometerEvent {
-    /// X-axis acceleration in G's (gravitational force).
-    public var x: Double
-    /// Y-axis acceleration in G's (gravitational force).
-    public var y: Double
-    /// Z-axis acceleration in G's (gravitational force).
-    public var z: Double
+/// A data sample from the device's barometers.
+public struct BarometerEvent {
+    /// The recorded pressure, in kilopascals.
+    public var pressure: Double
+    /// The change in altitude (in meters) since the first reported event.
+    public var relativeAltitude: Double
     /// The time when the logged item is valid.
     public var timestamp: TimeInterval
 
     #if SKIP
     // https://developer.android.com/reference/android/hardware/SensorEvent#values
-    init(event: SensorEvent) {
-        self.x = (-event.values[0] / SensorManager.GRAVITY_EARTH).toDouble()
-        self.y = (-event.values[1] / SensorManager.GRAVITY_EARTH).toDouble()
-        self.z = (-event.values[2] / SensorManager.GRAVITY_EARTH).toDouble()
+    init(event: SensorEvent, referencePressure: Float) {
+        self.pressure = event.values[0].toDouble() / 10.0 // convert from hPa to kPa
+        self.relativeAltitude = SensorManager.getAltitude(referencePressure, event.values[0]).toDouble()
         self.timestamp = event.timestamp / 1_000_000_000.0 // nanoseconds
-
     }
     #elseif os(iOS) || os(watchOS)
-    // https://developer.apple.com/documentation/coremotion/cmaccelerometerdata
-    init(data: CMAccelerometerData) {
-        self.x = data.acceleration.x
-        self.y = data.acceleration.y
-        self.z = data.acceleration.z
+    // https://developer.apple.com/documentation/coremotion/cmaltitudedata
+    init(data: CMAltitudeData) {
+        self.pressure = data.pressure.doubleValue
+        self.relativeAltitude = data.relativeAltitude.doubleValue
         self.timestamp = data.timestamp
     }
     #endif

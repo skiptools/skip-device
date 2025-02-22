@@ -1,7 +1,7 @@
 # SkipDevice
 
 The SkipDevice module is a dual-platform Skip framework that provides access to 
-device sensor data such as network reachability and location.
+network reachability, location, and device sensor data.
 
 ## Network Reachability
 
@@ -48,6 +48,17 @@ On iOS, you will need to add the `NSLocationWhenInUseUsageDescription` key to yo
 ```
 INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to …"
 ```
+
+## Motion
+
+### Motion Permissions
+
+On iOS, you will need to add the `NSMotionUsageDescription` key to your `Darwin/AppName.xcconfig` file:
+
+```
+INFOPLIST_KEY_NSMotionUsageDescription = "This app uses your motion information to …"
+```
+
 
 ## Accelerometer
 
@@ -113,7 +124,7 @@ struct GyroscopeView : View {
 ```
 
 
-### Magnetometer
+## Magnetometer
 
 The `MagnetometerProvider` type provides an `AsyncStream<MagnetometerEvent>` of device magnetometer changes.
 
@@ -143,6 +154,49 @@ struct MagnetometerView : View {
     }
 }
 ```
+
+
+## Barometer
+
+The `BarometerProvider` type provides an `AsyncStream<BarometerEvent>` of device barometer changes.
+
+It can be used in a View like this:
+
+```swift
+struct BarometerView : View {
+    @State var event: BarometerEvent?
+
+    var body: some View {
+        VStack {
+            if let event = event {
+                Text("pressure: \(event.pressure)") // The recorded pressure, in kilopascals.
+                Text("relativeAltitude: \(event.relativeAltitude)") // The change in altitude (in meters) since the first reported event.
+            }
+        }
+        .font(Font.body.monospaced())
+        .task {
+            let provider = BarometerProvider() // must retain reference
+            for await event in provider.monitor() {
+                self.event = event
+                // if cancelled { break }
+            }
+            provider.stop()
+        }
+    }
+}
+```
+
+### Barometer Permissions
+
+In order to access the device's barometer, you will need to 
+declare the permissions in the app's metadata.
+
+On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited to include:
+
+```
+<uses-feature android:name="android.hardware.sensor.barometer" android:required="true" />
+```
+
 
 ## Building
 

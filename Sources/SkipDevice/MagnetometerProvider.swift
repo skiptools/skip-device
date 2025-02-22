@@ -14,7 +14,6 @@ import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.SensorEvent
-import android.hardware.SensorEventListener2
 #endif
 
 private let logger: Logger = Logger(subsystem: "skip.device", category: "MagnetometerProvider") // adb logcat '*:S' 'skip.device.MagnetometerProvider:V'
@@ -23,7 +22,7 @@ private let logger: Logger = Logger(subsystem: "skip.device", category: "Magneto
 public class MagnetometerProvider {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private var listener: SensorEventListener2? = nil
+    private var listener: SensorEventHandler? = nil
     #elseif os(iOS) || os(watchOS)
     private let motionManager = CMMotionManager()
     #endif
