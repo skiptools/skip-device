@@ -11,14 +11,9 @@ import OSLog
 import CoreMotion
 #else
 import android.content.Context
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
 import android.hardware.SensorEventListener2
 #endif
 
@@ -26,13 +21,11 @@ private let logger: Logger = Logger(subsystem: "skip.device", category: "Acceler
 
 /// A motion provider.
 public class AccelerometerProvider {
-    #if !SKIP
-    #if os(iOS) || os(watchOS)
-    private let motionManager = CMMotionManager()
-    #endif
-    #else
+    #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private var listener: SensorEventListener2? = nil
+    #elseif os(iOS) || os(watchOS)
+    private let motionManager = CMMotionManager()
     #endif
 
     public init() {
@@ -40,6 +33,39 @@ public class AccelerometerProvider {
 
     deinit {
         stop()
+    }
+    
+    /// Set the update interval for the accelerometer. Must be set before `monitor()` is invoked.
+    public var updateInterval: TimeInterval? {
+        didSet {
+            #if os(iOS) || os(watchOS)
+            if let interval = updateInterval {
+                motionManager.accelerometerUpdateInterval = interval
+            }
+            #endif
+        }
+    }
+
+    /// Returns `true` if the accelerometer is available on this device
+    public var isAvailable: Bool {
+        #if SKIP
+        return sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != nil
+        #elseif os(iOS) || os(watchOS)
+        return motionManager.isAccelerometerAvailable
+        #else
+        return false // macOS, etc.
+        #endif
+    }
+
+    public func stop() {
+        #if SKIP
+        if listener != nil {
+            sensorManager.unregisterListener(listener)
+            listener = nil
+        }
+        #elseif os(iOS) || os(watchOS)
+        motionManager.stopAccelerometerUpdates()
+        #endif
     }
 
     // SKIP @nobridge // 'AsyncStream<AccelerometerEvent>' is not a bridged type
@@ -49,18 +75,22 @@ public class AccelerometerProvider {
 
         #if SKIP
         if let sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) {
-            listener = SensorEventHandler(
-                onSensorChangedCallback: { event in
-                    // https://developer.android.com/reference/android/hardware/SensorEvent#values
-                    let event = AccelerometerEvent(x: (-event.values[0] / SensorManager.GRAVITY_EARTH).toDouble(), y: (-event.values[1] / SensorManager.GRAVITY_EARTH).toDouble(), z: (-event.values[2] / SensorManager.GRAVITY_EARTH).toDouble(), timestamp: event.timestamp / 1_000_000_000.0)
-                    continuation.yield(event)
-                },
-                onAccuracyChangedCallback: { sensor, accuracy in
-                },
-                onFlushCompletedCallback: { sensor in
-                }
-            )
-            sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            listener = SensorEventHandler(onSensorChangedCallback: { event in
+                // https://developer.android.com/reference/android/hardware/SensorEvent#values
+                let event = AccelerometerEvent(
+                    x: (-event.values[0] / SensorManager.GRAVITY_EARTH).toDouble(),
+                    y: (-event.values[1] / SensorManager.GRAVITY_EARTH).toDouble(),
+                    z: (-event.values[2] / SensorManager.GRAVITY_EARTH).toDouble(),
+                    timestamp: event.timestamp / 1_000_000_000.0) // nanoseconds
+                continuation.yield(event)
+            })
+
+            // The rate sensor events are delivered at. This is only a hint to the system. Events may be received faster or slower than the specified rate. Usually events are received faster. The value must be one of SENSOR_DELAY_NORMAL, SENSOR_DELAY_UI, SENSOR_DELAY_GAME, or SENSOR_DELAY_FASTEST or, the desired delay between events in microseconds.
+            var interval = SensorManager.SENSOR_DELAY_NORMAL
+            if let updateInterval {
+                interval = Int(updateInterval * 1_000_000) // microseconds
+            }
+            sensorManager.registerListener(listener, sensor, interval)
         }
         #elseif os(iOS) || os(watchOS)
         motionManager.startAccelerometerUpdates(to: OperationQueue.main) { data, error in
@@ -82,33 +112,25 @@ public class AccelerometerProvider {
 
         return stream
     }
-
-    public func stop() {
-        #if !SKIP
-        #if os(iOS) || os(watchOS)
-        motionManager.stopAccelerometerUpdates()
-        #endif
-        #else
-        if listener != nil {
-            sensorManager.unregisterListener(listener)
-            listener = nil
-        }
-        #endif
-    }
 }
 
+/// A data sample from the device's three accelerometers.
 public struct AccelerometerEvent {
+    /// X-axis acceleration in G's (gravitational force).
     public var x: Double
+    /// Y-axis acceleration in G's (gravitational force).
     public var y: Double
+    /// Z-axis acceleration in G's (gravitational force).
     public var z: Double
+    /// The time when the logged item is valid.
     public var timestamp: TimeInterval
 }
 
 #if SKIP
 struct SensorEventHandler: SensorEventListener2 {
     let onSensorChangedCallback: (_ event: SensorEvent) -> ()
-    let onAccuracyChangedCallback: (_ sensor: Sensor, _ accuracy: Int) -> ()
-    let onFlushCompletedCallback: (_ sensor: Sensor) -> ()
+    let onAccuracyChangedCallback: (_ sensor: Sensor, _ accuracy: Int) -> () = { _, _ in }
+    let onFlushCompletedCallback: (_ sensor: Sensor) -> () = { _ in }
 
     override func onSensorChanged(event: SensorEvent) {
         onSensorChangedCallback(event)
@@ -124,5 +146,4 @@ struct SensorEventHandler: SensorEventListener2 {
 
 }
 #endif
-
 #endif
