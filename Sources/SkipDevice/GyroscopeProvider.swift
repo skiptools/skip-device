@@ -17,10 +17,10 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener2
 #endif
 
-private let logger: Logger = Logger(subsystem: "skip.device", category: "AccelerometerProvider") // adb logcat '*:S' 'skip.device.AccelerometerProvider:V'
+private let logger: Logger = Logger(subsystem: "skip.device", category: "GyroscopeProvider") // adb logcat '*:S' 'skip.device.GyroscopeProvider:V'
 
-/// A provider for device accelerometer events.
-public class AccelerometerProvider {
+/// A provider for device gyroscope events.
+public class GyroscopeProvider {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private var listener: SensorEventListener2? = nil
@@ -35,23 +35,23 @@ public class AccelerometerProvider {
         stop()
     }
     
-    /// Set the update interval for the accelerometer. Must be set before `monitor()` is invoked.
+    /// Set the update interval for the gyroscope. Must be set before `monitor()` is invoked.
     public var updateInterval: TimeInterval? {
         didSet {
             #if os(iOS) || os(watchOS)
             if let interval = updateInterval {
-                motionManager.accelerometerUpdateInterval = interval
+                motionManager.gyroUpdateInterval = interval
             }
             #endif
         }
     }
 
-    /// Returns `true` if the accelerometer is available on this device
+    /// Returns `true` if the gyroscope is available on this device
     public var isAvailable: Bool {
         #if SKIP
-        return sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != nil
+        return sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != nil
         #elseif os(iOS) || os(watchOS)
-        return motionManager.isAccelerometerAvailable
+        return motionManager.isGyroAvailable
         #else
         return false // macOS, etc.
         #endif
@@ -64,19 +64,19 @@ public class AccelerometerProvider {
             listener = nil
         }
         #elseif os(iOS) || os(watchOS)
-        motionManager.stopAccelerometerUpdates()
+        motionManager.stopGyroUpdates()
         #endif
     }
 
-    // SKIP @nobridge // 'AsyncStream<AccelerometerEvent>' is not a bridged type
-    public func monitor() -> AsyncStream<AccelerometerEvent> {
+    // SKIP @nobridge // 'AsyncStream<GyroscopeEvent>' is not a bridged type
+    public func monitor() -> AsyncStream<GyroscopeEvent> {
         logger.debug("monitor")
-        let (stream, continuation) = AsyncStream.makeStream(of: AccelerometerEvent.self)
+        let (stream, continuation) = AsyncStream.makeStream(of: GyroscopeEvent.self)
 
         #if SKIP
-        if let sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) {
+        if let sensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) {
             listener = SensorEventHandler(onSensorChangedCallback: { event in
-                continuation.yield(AccelerometerEvent(event: event))
+                continuation.yield(GyroscopeEvent(event: event))
             })
 
             // The rate sensor events are delivered at. This is only a hint to the system. Events may be received faster or slower than the specified rate. Usually events are received faster. The value must be one of SENSOR_DELAY_NORMAL, SENSOR_DELAY_UI, SENSOR_DELAY_GAME, or SENSOR_DELAY_FASTEST or, the desired delay between events in microseconds.
@@ -87,12 +87,12 @@ public class AccelerometerProvider {
             sensorManager.registerListener(listener, sensor, interval)
         }
         #elseif os(iOS) || os(watchOS)
-        motionManager.startAccelerometerUpdates(to: OperationQueue.main) { data, error in
+        motionManager.startGyroUpdates(to: OperationQueue.main) { data, error in
             if let error = error {
-                logger.debug("accelerometer update error: \(error)")
+                logger.debug("gyroscope update error: \(error)")
                 //continuation.finish(throwing: error) // would need to be AsyncThrowingStream
             } else if let data = data {
-                continuation.yield(AccelerometerEvent(data: data))
+                continuation.yield(GyroscopeEvent(data: data))
             }
         }
         #endif
@@ -106,13 +106,13 @@ public class AccelerometerProvider {
     }
 }
 
-/// A data sample from the device's three accelerometers.
-public struct AccelerometerEvent {
-    /// X-axis acceleration in G's (gravitational force).
+/// A data sample from the device's three gyroscopes.
+public struct GyroscopeEvent {
+    /// Angular speed around the x-axis
     public var x: Double
-    /// Y-axis acceleration in G's (gravitational force).
+    /// Angular speed around the y-axis
     public var y: Double
-    /// Z-axis acceleration in G's (gravitational force).
+    /// Angular speed around the z-axis
     public var z: Double
     /// The time when the logged item is valid.
     public var timestamp: TimeInterval
@@ -120,18 +120,17 @@ public struct AccelerometerEvent {
     #if SKIP
     // https://developer.android.com/reference/android/hardware/SensorEvent#values
     init(event: SensorEvent) {
-        self.x = (-event.values[0] / SensorManager.GRAVITY_EARTH).toDouble()
-        self.y = (-event.values[1] / SensorManager.GRAVITY_EARTH).toDouble()
-        self.z = (-event.values[2] / SensorManager.GRAVITY_EARTH).toDouble()
+        self.x = event.values[0].toDouble()
+        self.y = event.values[1].toDouble()
+        self.z = event.values[2].toDouble()
         self.timestamp = event.timestamp / 1_000_000_000.0 // nanoseconds
-
     }
     #elseif os(iOS) || os(watchOS)
-    // https://developer.apple.com/documentation/coremotion/cmaccelerometerdata
-    init(data: CMAccelerometerData) {
-        self.x = data.acceleration.x
-        self.y = data.acceleration.y
-        self.z = data.acceleration.z
+    // https://developer.apple.com/documentation/coremotion/cmgyrodata
+    init(data: CMGyroData) {
+        self.x = data.rotationRate.x
+        self.y = data.rotationRate.y
+        self.z = data.rotationRate.z
         self.timestamp = data.timestamp
     }
     #endif
