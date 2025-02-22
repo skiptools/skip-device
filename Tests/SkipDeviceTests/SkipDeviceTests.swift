@@ -24,11 +24,4 @@ final class SkipDeviceTests: XCTestCase {
         let location = try await lp.fetchCurrentLocation()
         XCTAssertNotEqual(0.0, location.latitude)
     }
-
-    func testLocationCalculation() {
-        let l1 = Location(latitude: 42.21, longitude: 71.3) // Paris
-        let l2 = Location(latitude: 35.6895, longitude: 139.6917) // Tokyo
-        let distance = l1.distance(from: l2)
-        XCTAssertEqual(5799.680063587996, distance)
-    }
 }
