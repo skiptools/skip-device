@@ -19,7 +19,7 @@ import kotlin.coroutines.resume
 typealias NSObject = AnyObject
 #endif
 
-let logger: Logger = Logger(subsystem: "skip.device", category: "LocationProvider") // adb logcat '*:S' 'skip.device.LocationProvider:V'
+private let logger: Logger = Logger(subsystem: "skip.device", category: "LocationProvider") // adb logcat '*:S' 'skip.device.LocationProvider:V'
 
 /// A current location fetcher.
 ///
@@ -28,7 +28,7 @@ let logger: Logger = Logger(subsystem: "skip.device", category: "LocationProvide
 public class LocationProvider: NSObject {
     #if !SKIP
     private let locationManager = CLLocationManager()
-    private var completion: ((Result<Location, Error>) -> Void)?
+    private var completion: ((Result<LocationEvent, Error>) -> Void)?
     #endif
 
     public override init() {
@@ -38,8 +38,8 @@ public class LocationProvider: NSObject {
         #endif
     }
 
-    public func fetchCurrentLocation() async throws -> Location {
-        logger.log("fetchCurrentLocation")
+    public func fetchCurrentLocation() async throws -> LocationEvent {
+        logger.debug("fetchCurrentLocation")
         #if !SKIP
         return try await withCheckedThrowingContinuation { continuation in
             self.completion = { result in
@@ -76,10 +76,10 @@ public class LocationProvider: NSObject {
 
 #if SKIP
 class LocListener : android.location.LocationListener {
-    var callback: (Location) -> Void = { _ in }
+    var callback: (LocationEvent) -> Void = { _ in }
 
     override func onLocationChanged(location: android.location.Location) {
-        callback(Location(latitude: location.latitude, longitude: location.longitude))
+        callback(LocationEvent(location: location))
     }
 
     override func onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
@@ -112,7 +112,7 @@ extension LocationProvider: CLLocationManagerDelegate {
 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         let location = locations.last!
-        completion?(.success(Location(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)))
+        completion?(.success(LocationEvent(location: location)))
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -127,45 +127,53 @@ public struct LocationError : LocalizedError {
 }
 
 /// A lat/lon location (in degrees).
-public struct Location {
+public struct LocationEvent {
     public var latitude: Double
     public var longitude: Double
+    public var horizontalAccuracy: Double
 
-    public init(latitude: Double, longitude: Double) {
-        self.latitude = latitude
-        self.longitude = longitude
+    public var altitude: Double
+    public var ellipsoidalAltitude: Double
+    public var verticalAccuracy: Double
+
+    public var speed: Double
+    public var speedAccuracy: Double
+
+    public var course: Double
+    public var courseAccuracy: Double
+
+    public var timestamp: TimeInterval
+
+    #if SKIP
+    /// https://developer.android.com/reference/android/location/Location
+    init(location: android.location.Location) {
+        self.latitude = location.latitude
+        self.longitude = location.longitude
+        self.horizontalAccuracy = location.accuracy.toDouble()
+        self.altitude = location.mslAltitudeMeters
+        self.ellipsoidalAltitude = location.altitude
+        self.verticalAccuracy = location.verticalAccuracyMeters.toDouble()
+        self.speed = location.speed.toDouble()
+        self.speedAccuracy = location.speedAccuracyMetersPerSecond.toDouble()
+        self.course = location.bearing.toDouble()
+        self.courseAccuracy = location.bearingAccuracyDegrees.toDouble()
+        self.timestamp = location.time.toDouble() / 1_000.0
     }
-
-    public func coordinates(fractionalDigits: Int? = nil) -> (latitude: Double, longitude: Double) {
-        guard let fractionalDigits = fractionalDigits else {
-            return (latitude, longitude)
-        }
-        let factor = pow(10.0, Double(fractionalDigits))
-        return (latitude: Double(round(latitude * factor)) / factor, longitude: Double(round(longitude * factor)) / factor)
+    #else
+    /// https://developer.apple.com/documentation/corelocation/cllocation
+    init(location: CLLocation) {
+        self.latitude = location.coordinate.latitude
+        self.longitude = location.coordinate.longitude
+        self.horizontalAccuracy = location.horizontalAccuracy
+        self.altitude = location.altitude
+        self.ellipsoidalAltitude = location.ellipsoidalAltitude
+        self.verticalAccuracy = location.verticalAccuracy
+        self.speed = location.speed
+        self.speedAccuracy = location.speedAccuracy
+        self.course = location.course
+        self.courseAccuracy = location.courseAccuracy
+        self.timestamp = location.timestamp.timeIntervalSince1970
     }
-
-    /// Calculate the distance from another Location using the Haversine formula and returns the distance in kilometers
-    public func distance(from location: Location) -> Double {
-        let lat1 = self.latitude
-        let lon1 = self.longitude
-        let lat2 = location.latitude
-        let lon2 = location.longitude
-
-        let dLat = (lat2 - lat1).toRadians
-        let dLon = (lon2 - lon1).toRadians
-
-        let slat: Double = sin(dLat / 2.0)
-        let slon: Double = sin(dLon / 2.0)
-        let a: Double = slat * slat + cos(lat1.toRadians) * cos(lat2.toRadians) * slon * slon
-        let c: Double = 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
-
-        return c * 6371.0 // earthRadiusKilometers
-    }
-}
-
-extension Double {
-    var toRadians: Double {
-        return self * .pi / 180.0
-    }
+    #endif
 }
 #endif

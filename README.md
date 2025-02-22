@@ -28,8 +28,8 @@ You can request the current device location with:
 
 ```swift
 let provider = LocationProvider()
-let location: Location = try await provider.fetchCurrentLocation()
-logger.log("latitude: \(location.latitude) longitude: \(location.longitude)")
+let location: LocationEvent = try await provider.fetchCurrentLocation()
+logger.log("latitude: \(location.latitude) longitude: \(location.longitude) altitude: \(location.altitude)")
 ```
 
 ### Permissions
@@ -47,6 +47,35 @@ On iOS, you will need to add the `NSLocationWhenInUseUsageDescription` key to yo
 
 ```
 INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to …"
+```
+
+## Accelerometer
+
+The `AccelerometerProvider` type provides an `AsyncStream<AccelerometerEvent>` of device accelerometer changes.
+
+It can be used in a View like this:
+
+```swift
+struct AccelerometerView : View {
+    @State var orientation: AccelerometerEvent?
+
+    var body: some View {
+        VStack {
+            if let orientation = orientation {
+                Text("x: \(orientation.x)")
+                Text("y: \(orientation.y)")
+                Text("z: \(orientation.z)")
+            }
+        }
+        .task {
+            let provider = AccelerometerProvider()
+            for await event in provider.monitor() {
+                self.orientation = event
+            }
+            provider.stop()
+        }
+    }
+}
 ```
 
 ## Building

@@ -3,6 +3,9 @@
 // as published by the Free Software Foundation https://fsf.org
 #if !SKIP_BRIDGE
 import Foundation
+#if canImport(OSLog)
+import OSLog
+#endif
 #if !SKIP
 import SystemConfiguration
 #else
@@ -12,11 +15,14 @@ import android.net.NetworkCapabilities
 import android.os.Build
 #endif
 
+private let logger: Logger = Logger(subsystem: "skip.device", category: "NetworkReachability") // adb logcat '*:S' 'skip.device.NetworkReachability:V'
+
 /// Provides general information for a Skip app.
 public class NetworkReachability {
 
     /// Returns true if the network is currently reachable
     public static var isNetworkReachable: Bool {
+        logger.debug("isNetworkReachable")
         #if !SKIP
         var zeroAddress = sockaddr_in()
         zeroAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
