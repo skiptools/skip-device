@@ -14,7 +14,6 @@ import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.SensorEvent
-import android.hardware.SensorEventListener2
 #endif
 
 private let logger: Logger = Logger(subsystem: "skip.device", category: "GyroscopeProvider") // adb logcat '*:S' 'skip.device.GyroscopeProvider:V'
@@ -23,7 +22,7 @@ private let logger: Logger = Logger(subsystem: "skip.device", category: "Gyrosco
 public class GyroscopeProvider {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private var listener: SensorEventListener2? = nil
+    private var listener: SensorEventHandler? = nil
     #elseif os(iOS) || os(watchOS)
     private let motionManager = CMMotionManager()
     #endif
@@ -70,7 +69,7 @@ public class GyroscopeProvider {
 
     // SKIP @nobridge // 'AsyncStream<GyroscopeEvent>' is not a bridged type
     public func monitor() -> AsyncStream<GyroscopeEvent> {
-        logger.debug("monitor")
+        logger.debug("starting gyroscope monitor")
         let (stream, continuation) = AsyncStream.makeStream(of: GyroscopeEvent.self)
 
         #if SKIP
@@ -98,7 +97,7 @@ public class GyroscopeProvider {
         #endif
 
         continuation.onTermination = { [weak self] _ in
-            logger.info("terminating")
+            logger.debug("cancelling gyroscope monitor")
             self?.stop()
         }
 

@@ -14,7 +14,6 @@ import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.SensorEvent
-import android.hardware.SensorEventListener2
 #endif
 
 private let logger: Logger = Logger(subsystem: "skip.device", category: "AccelerometerProvider") // adb logcat '*:S' 'skip.device.AccelerometerProvider:V'
@@ -23,7 +22,7 @@ private let logger: Logger = Logger(subsystem: "skip.device", category: "Acceler
 public class AccelerometerProvider {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private var listener: SensorEventListener2? = nil
+    private var listener: SensorEventHandler? = nil
     #elseif os(iOS) || os(watchOS)
     private let motionManager = CMMotionManager()
     #endif
@@ -70,7 +69,7 @@ public class AccelerometerProvider {
 
     // SKIP @nobridge // 'AsyncStream<AccelerometerEvent>' is not a bridged type
     public func monitor() -> AsyncStream<AccelerometerEvent> {
-        logger.debug("monitor")
+        logger.debug("starting accelerometer monitor")
         let (stream, continuation) = AsyncStream.makeStream(of: AccelerometerEvent.self)
 
         #if SKIP
@@ -98,7 +97,7 @@ public class AccelerometerProvider {
         #endif
 
         continuation.onTermination = { [weak self] _ in
-            logger.info("terminating")
+            logger.debug("cancelling accelerometer monitor")
             self?.stop()
         }
 
