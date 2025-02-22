@@ -11,7 +11,7 @@ You can check whether the device is currenly able to access the network with:
 let isReachable: Bool = networkReachability.isNetworkReachable
 ```
 
-### Permissions
+### Network Reachability Permissions
 
 In order to access the device's photos or media library, you will need to 
 declare the permissions in the app's metadata.
@@ -32,7 +32,7 @@ let location: LocationEvent = try await provider.fetchCurrentLocation()
 logger.log("latitude: \(location.latitude) longitude: \(location.longitude) altitude: \(location.altitude)")
 ```
 
-### Permissions
+### Location Permissions
 
 In order to access the device's location, you will need to 
 declare the permissions in the app's metadata.
@@ -56,21 +56,87 @@ The `AccelerometerProvider` type provides an `AsyncStream<AccelerometerEvent>` o
 It can be used in a View like this:
 
 ```swift
+import SwiftUI
+import SkipDevice
+
 struct AccelerometerView : View {
-    @State var orientation: AccelerometerEvent?
+    @State var event: AccelerometerEvent?
 
     var body: some View {
         VStack {
-            if let orientation = orientation {
-                Text("x: \(orientation.x)")
-                Text("y: \(orientation.y)")
-                Text("z: \(orientation.z)")
+            if let event = event {
+                Text("x: \(event.x)")
+                Text("y: \(event.y)")
+                Text("z: \(event.z)")
             }
         }
         .task {
-            let provider = AccelerometerProvider()
+            let provider = AccelerometerProvider() // must retain reference
             for await event in provider.monitor() {
-                self.orientation = event
+                self.event = event
+                // if cancelled { break }
+            }
+            provider.stop()
+        }
+    }
+}
+```
+
+## Gyroscope
+
+The `GyroscopeProvider` type provides an `AsyncStream<GyroscopeEvent>` of device gyroscope changes.
+
+It can be used in a View like this:
+
+```swift
+struct GyroscopeView : View {
+    @State var event: GyroscopeEvent?
+
+    var body: some View {
+        VStack {
+            if let event = event {
+                Text("x: \(event.x)")
+                Text("y: \(event.y)")
+                Text("z: \(event.z)")
+            }
+        }
+        .task {
+            let provider = GyroscopeProvider() // must retain reference
+            for await event in provider.monitor() {
+                self.event = event
+                // if cancelled { break }
+            }
+            provider.stop()
+        }
+    }
+}
+```
+
+
+### Magnetometer
+
+The `MagnetometerProvider` type provides an `AsyncStream<MagnetometerEvent>` of device magnetometer changes.
+
+It can be used in a View like this:
+
+```swift
+struct MagnetometerView : View {
+    @State var event: MagnetometerEvent?
+
+    var body: some View {
+        VStack {
+            if let event = event {
+                Text("x: \(event.x)")
+                Text("y: \(event.y)")
+                Text("z: \(event.z)")
+            }
+        }
+        .font(Font.body.monospaced())
+        .task {
+            let provider = MagnetometerProvider() // must retain reference
+            for await event in provider.monitor() {
+                self.event = event
+                // if cancelled { break }
             }
             provider.stop()
         }
