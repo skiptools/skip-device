@@ -75,8 +75,11 @@ public class LocationProvider: NSObject {
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: LocationEvent.self)
 
         #if SKIP
-        listener = LocListener(callback: { continuation.yield(with: .success($0)) })
-        let intervalMillis = Int64(0)
+        listener = LocListener(callback: { location in
+            logger.info("location update: \(location.latitude) \(location.longitude)")
+            continuation.yield(with: .success(location))
+        })
+        let intervalMillis = Int64(1_000)
         // https://developer.android.com/reference/android/location/LocationRequest.Builder
         let request = LocationRequest.Builder(intervalMillis).build() // TODO: setQuality, etc.
         do {
@@ -89,13 +92,14 @@ public class LocationProvider: NSObject {
         self.callback = { result in
             switch result {
             case .success(let location):
+                logger.info("location update: \(location.latitude) \(location.longitude)")
                 continuation.yield(with: .success(location))
             case .failure(let error):
                 continuation.yield(with: .failure(error))
                 self.callback = nil
             }
         }
-        requestLocationOrAuthorization()
+        locationManager.startUpdatingLocation()
         #endif
 
         continuation.onTermination = { [weak self] _ in
@@ -108,40 +112,43 @@ public class LocationProvider: NSObject {
 
     /// Issues a single-shot request for the current location
     public func fetchCurrentLocation() async throws -> LocationEvent {
-        logger.debug("fetchCurrentLocation")
+        logger.info("fetchCurrentLocation")
         #if !SKIP
         return try await withCheckedThrowingContinuation { continuation in
             self.callback = { result in
                 switch result {
                 case .success(let location):
                     continuation.resume(returning: location)
+                    self.locationManager.stopUpdatingLocation()
                     self.callback = nil
                 case .failure(let error):
                     continuation.resume(throwing: error)
+                    self.locationManager.stopUpdatingLocation()
                     self.callback = nil
                 }
             }
-            requestLocationOrAuthorization()
+            locationManager.startUpdatingLocation()
         }
         #else
-        return suspendCancellableCoroutine { continuation in
-            let context = ProcessInfo.processInfo.androidContext
-            let locationManager = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
-
-            let locationListener = LocListener()
-
+        let context = ProcessInfo.processInfo.androidContext
+        let locationManager = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        let locationListener = LocListener()
+        let location = suspendCancellableCoroutine { continuation in
             locationListener.callback = {
                 locationManager.removeUpdates(locationListener)
                 continuation.resume($0)
             }
 
-            locationManager.requestSingleUpdate(android.location.LocationManager.GPS_PROVIDER, locationListener, android.os.Looper.getMainLooper())
-
             continuation.invokeOnCancellation { _ in
                 locationManager.removeUpdates(locationListener)
                 continuation.cancel()
             }
+
+            logger.info("locationManager.requestSingleUpdate")
+            locationManager.requestSingleUpdate(android.location.LocationManager.GPS_PROVIDER, locationListener, Looper.getMainLooper())
         }
+        let _ = locationListener // need to hold the reference so it doesn't get gc'd
+        return location
         #endif
     }
 }
@@ -160,32 +167,25 @@ struct LocListener : LocationListener {
 }
 #else
 extension LocationProvider: CLLocationManagerDelegate {
-    private func requestLocationOrAuthorization() {
-        switch locationManager.authorizationStatus {
-        case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
-        default:
-            locationManager.startUpdatingLocation()
-        }
-    }
-
-    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        logger.info("locationManager.locationManagerDidChangeAuthorization")
-        if callback != nil {
-            requestLocationOrAuthorization()
-        }
-    }
-
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        logger.debug("locationManager.didUpdateLocations: \(locations)")
+        logger.info("LocationProvider.didUpdateLocations: \(locations)")
         for location in locations {
             callback?(.success(LocationEvent(location: location)))
         }
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        logger.error("locationManager.didFailWithError: \(error)")
+        logger.error("LocationProvider.didFailWithError: \(error)")
         callback?(.failure(error))
+    }
+
+    public func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: any Error) {
+        logger.error("LocationProvider.monitoringDidFailFor: \(error)")
+        callback?(.failure(error))
+    }
+
+    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        logger.info("LocationProvider.locationManagerDidChangeAuthorization: \(manager.authorizationStatus.rawValue)")
     }
 }
 #endif
