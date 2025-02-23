@@ -26,14 +26,6 @@ public class AccelerometerProvider {
     #elseif os(iOS) || os(watchOS)
     private let motionManager = CMMotionManager()
     #endif
-
-    public init() {
-    }
-
-    deinit {
-        stop()
-    }
-    
     /// Set the update interval for the accelerometer. Must be set before `monitor()` is invoked.
     public var updateInterval: TimeInterval? {
         didSet {
@@ -45,6 +37,14 @@ public class AccelerometerProvider {
         }
     }
 
+
+    public init() {
+    }
+
+    deinit {
+        stop()
+    }
+    
     /// Returns `true` if the accelerometer is available on this device
     public var isAvailable: Bool {
         #if SKIP
@@ -68,30 +68,21 @@ public class AccelerometerProvider {
     }
 
     // SKIP @nobridge // 'AsyncStream<AccelerometerEvent>' is not a bridged type
-    public func monitor() -> AsyncStream<AccelerometerEvent> {
+    public func monitor() -> AsyncThrowingStream<AccelerometerEvent, Error> {
         logger.debug("starting accelerometer monitor")
-        let (stream, continuation) = AsyncStream.makeStream(of: AccelerometerEvent.self)
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: AccelerometerEvent.self)
 
         #if SKIP
-        if let sensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) {
-            listener = SensorEventHandler(onSensorChangedCallback: { event in
-                continuation.yield(AccelerometerEvent(event: event))
-            })
-
-            // The rate sensor events are delivered at. This is only a hint to the system. Events may be received faster or slower than the specified rate. Usually events are received faster. The value must be one of SENSOR_DELAY_NORMAL, SENSOR_DELAY_UI, SENSOR_DELAY_GAME, or SENSOR_DELAY_FASTEST or, the desired delay between events in microseconds.
-            var interval = SensorManager.SENSOR_DELAY_NORMAL
-            if let updateInterval {
-                interval = Int(updateInterval * 1_000_000) // microseconds
-            }
-            sensorManager.registerListener(listener, sensor, interval)
+        listener = sensorManager.startSensorUpdates(type: Sensor.TYPE_ACCELEROMETER, interval: updateInterval) { event in
+            continuation.yield(AccelerometerEvent(event: event))
         }
         #elseif os(iOS) || os(watchOS)
         motionManager.startAccelerometerUpdates(to: OperationQueue.main) { data, error in
             if let error = error {
                 logger.debug("accelerometer update error: \(error)")
-                //continuation.finish(throwing: error) // would need to be AsyncThrowingStream
+                continuation.yield(with: .failure(error))
             } else if let data = data {
-                continuation.yield(AccelerometerEvent(data: data))
+                continuation.yield(with: .success(AccelerometerEvent(data: data)))
             }
         }
         #endif

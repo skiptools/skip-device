@@ -26,14 +26,6 @@ public class GyroscopeProvider {
     #elseif os(iOS) || os(watchOS)
     private let motionManager = CMMotionManager()
     #endif
-
-    public init() {
-    }
-
-    deinit {
-        stop()
-    }
-    
     /// Set the update interval for the gyroscope. Must be set before `monitor()` is invoked.
     public var updateInterval: TimeInterval? {
         didSet {
@@ -45,6 +37,14 @@ public class GyroscopeProvider {
         }
     }
 
+
+    public init() {
+    }
+
+    deinit {
+        stop()
+    }
+    
     /// Returns `true` if the gyroscope is available on this device
     public var isAvailable: Bool {
         #if SKIP
@@ -68,30 +68,21 @@ public class GyroscopeProvider {
     }
 
     // SKIP @nobridge // 'AsyncStream<GyroscopeEvent>' is not a bridged type
-    public func monitor() -> AsyncStream<GyroscopeEvent> {
+    public func monitor() -> AsyncThrowingStream<GyroscopeEvent, Error> {
         logger.debug("starting gyroscope monitor")
-        let (stream, continuation) = AsyncStream.makeStream(of: GyroscopeEvent.self)
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: GyroscopeEvent.self)
 
         #if SKIP
-        if let sensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) {
-            listener = SensorEventHandler(onSensorChangedCallback: { event in
-                continuation.yield(GyroscopeEvent(event: event))
-            })
-
-            // The rate sensor events are delivered at. This is only a hint to the system. Events may be received faster or slower than the specified rate. Usually events are received faster. The value must be one of SENSOR_DELAY_NORMAL, SENSOR_DELAY_UI, SENSOR_DELAY_GAME, or SENSOR_DELAY_FASTEST or, the desired delay between events in microseconds.
-            var interval = SensorManager.SENSOR_DELAY_NORMAL
-            if let updateInterval {
-                interval = Int(updateInterval * 1_000_000) // microseconds
-            }
-            sensorManager.registerListener(listener, sensor, interval)
+        listener = sensorManager.startSensorUpdates(type: Sensor.TYPE_GYROSCOPE, interval: updateInterval) { event in
+            continuation.yield(GyroscopeEvent(event: event))
         }
         #elseif os(iOS) || os(watchOS)
         motionManager.startGyroUpdates(to: OperationQueue.main) { data, error in
             if let error = error {
                 logger.debug("gyroscope update error: \(error)")
-                //continuation.finish(throwing: error) // would need to be AsyncThrowingStream
+                continuation.yield(with: .failure(error))
             } else if let data = data {
-                continuation.yield(GyroscopeEvent(data: data))
+                continuation.yield(with: .success(GyroscopeEvent(data: data)))
             }
         }
         #endif

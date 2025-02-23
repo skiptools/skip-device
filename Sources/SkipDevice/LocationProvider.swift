@@ -10,7 +10,11 @@ import OSLog
 #if !SKIP
 import CoreLocation
 #else
+import android.os.Looper
 import android.content.Context
+import android.location.LocationManager
+import android.location.LocationRequest
+import android.location.LocationListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -26,9 +30,12 @@ private let logger: Logger = Logger(subsystem: "skip.device", category: "Locatio
 /// Requires `INFOPLIST_KEY_NSLocationWhenInUseUsageDescription` in `App.xcconfig` and
 /// `<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>` in `AndroidManifest.xml`.
 public class LocationProvider: NSObject {
-    #if !SKIP
+    #if SKIP
+    private let locationManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    private var listener: LocListener?
+    #else
     private let locationManager = CLLocationManager()
-    private var completion: ((Result<LocationEvent, Error>) -> Void)?
+    private var callback: ((Result<LocationEvent, Error>) -> Void)?
     #endif
 
     public override init() {
@@ -38,16 +45,80 @@ public class LocationProvider: NSObject {
         #endif
     }
 
+    deinit {
+        stop()
+    }
+
+    /// Returns `true` if the location is available on this device
+    public var isAvailable: Bool {
+        #if SKIP
+        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        #else
+        return CLLocationManager.locationServicesEnabled()
+        #endif
+    }
+
+    public func stop() {
+        #if SKIP
+        if listener != nil {
+            locationManager.removeUpdates(listener!)
+            listener = nil
+        }
+        #else
+        locationManager.stopUpdatingLocation()
+        #endif
+    }
+
+    // SKIP @nobridge // 'AsyncThrowingStream<LocationEvent, Error>' is not a bridged type
+    public func monitor() -> AsyncThrowingStream<LocationEvent, Error> {
+        logger.debug("starting location monitor")
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: LocationEvent.self)
+
+        #if SKIP
+        listener = LocListener(callback: { continuation.yield(with: .success($0)) })
+        let intervalMillis = Int64(0)
+        // https://developer.android.com/reference/android/location/LocationRequest.Builder
+        let request = LocationRequest.Builder(intervalMillis).build() // TODO: setQuality, etc.
+        do {
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, request, ProcessInfo.processInfo.androidContext.mainExecutor, listener!)
+        } catch {
+            logger.error("error requesting location updates: \(error) ")
+            continuation.yield(with: .failure(error))
+        }
+        #else
+        self.callback = { result in
+            switch result {
+            case .success(let location):
+                continuation.yield(with: .success(location))
+            case .failure(let error):
+                continuation.yield(with: .failure(error))
+                self.callback = nil
+            }
+        }
+        requestLocationOrAuthorization()
+        #endif
+
+        continuation.onTermination = { [weak self] _ in
+            logger.debug("cancelling location monitor")
+            self?.stop()
+        }
+
+        return stream
+    }
+
+    /// Issues a single-shot request for the current location
     public func fetchCurrentLocation() async throws -> LocationEvent {
         logger.debug("fetchCurrentLocation")
         #if !SKIP
         return try await withCheckedThrowingContinuation { continuation in
-            self.completion = { result in
+            self.callback = { result in
                 switch result {
                 case .success(let location):
                     continuation.resume(returning: location)
+                    self.callback = nil
                 case .failure(let error):
                     continuation.resume(throwing: error)
+                    self.callback = nil
                 }
             }
             requestLocationOrAuthorization()
@@ -58,6 +129,7 @@ public class LocationProvider: NSObject {
             let locationManager = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
 
             let locationListener = LocListener()
+
             locationListener.callback = {
                 locationManager.removeUpdates(locationListener)
                 continuation.resume($0)
@@ -75,7 +147,7 @@ public class LocationProvider: NSObject {
 }
 
 #if SKIP
-class LocListener : android.location.LocationListener {
+struct LocListener : LocationListener {
     var callback: (LocationEvent) -> Void = { _ in }
 
     override func onLocationChanged(location: android.location.Location) {
@@ -89,38 +161,34 @@ class LocListener : android.location.LocationListener {
 #else
 extension LocationProvider: CLLocationManagerDelegate {
     private func requestLocationOrAuthorization() {
-        // unnecessary since the delegate will raise an error if the services are not enabled
-        //if !CLLocationManager.locationServicesEnabled() {
-        //    logger.error("location services not enabled")
-        //    completion?(Result.failure(LocationError(errorDescription: "Location services not enabled")))
-        //    return
-        //}
-
         switch locationManager.authorizationStatus {
         case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
         default:
-            locationManager.requestLocation()
+            locationManager.startUpdatingLocation()
         }
     }
 
     public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if completion != nil {
+        logger.info("locationManager.locationManagerDidChangeAuthorization")
+        if callback != nil {
             requestLocationOrAuthorization()
         }
     }
 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        let location = locations.last!
-        completion?(.success(LocationEvent(location: location)))
+        logger.debug("locationManager.didUpdateLocations: \(locations)")
+        for location in locations {
+            callback?(.success(LocationEvent(location: location)))
+        }
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        completion?(.failure(error))
+        logger.error("locationManager.didFailWithError: \(error)")
+        callback?(.failure(error))
     }
 }
 #endif
-
 
 public struct LocationError : LocalizedError {
     public var errorDescription: String?
