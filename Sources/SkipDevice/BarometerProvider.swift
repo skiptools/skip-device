@@ -94,6 +94,10 @@ public class BarometerProvider {
 }
 
 /// A data sample from the device's barometers.
+///
+/// Encapsulates:
+/// - Darwin: [CMAltitudeData](https://developer.apple.com/documentation/coremotion/cmaltitudedata)
+/// - Android: [Sensor.TYPE_PRESSURE](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_pressure:)
 public struct BarometerEvent {
     /// The recorded pressure, in kilopascals.
     public var pressure: Double
@@ -103,7 +107,7 @@ public struct BarometerEvent {
     public var timestamp: TimeInterval
 
     #if SKIP
-    // https://developer.android.com/reference/android/hardware/SensorEvent#values
+    // https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_pressure:
     init(event: SensorEvent, referencePressure: Float) {
         self.pressure = event.values[0].toDouble() / 10.0 // convert from hPa to kPa
         self.relativeAltitude = SensorManager.getAltitude(referencePressure, event.values[0]).toDouble()

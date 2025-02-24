@@ -97,6 +97,10 @@ public class AccelerometerProvider {
 }
 
 /// A data sample from the device's three accelerometers.
+///
+/// Encapsulates:
+/// - Darwin: [CMAccelerometerData](https://developer.apple.com/documentation/coremotion/cmaccelerometerdata)
+/// - Android: [Sensor.TYPE_ACCELEROMETER](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_accelerometer:)
 public struct AccelerometerEvent {
     /// X-axis acceleration in G's (gravitational force).
     public var x: Double
@@ -108,7 +112,7 @@ public struct AccelerometerEvent {
     public var timestamp: TimeInterval
 
     #if SKIP
-    // https://developer.android.com/reference/android/hardware/SensorEvent#values
+    // https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_accelerometer:
     init(event: SensorEvent) {
         self.x = (-event.values[0] / SensorManager.GRAVITY_EARTH).toDouble()
         self.y = (-event.values[1] / SensorManager.GRAVITY_EARTH).toDouble()
