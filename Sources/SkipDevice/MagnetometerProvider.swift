@@ -96,6 +96,11 @@ public class MagnetometerProvider {
     }
 }
 
+/// A data sample from the device's magnetometer.
+///
+/// Encapsulates:
+/// - Darwin: [CMMagnetometerData](https://developer.apple.com/documentation/coremotion/cmmagnetometerdata)
+/// - Android: [Sensor.TYPE_MAGNETIC_FIELD](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_magnetic_field:)
 public struct MagnetometerEvent {
     /// X-axis magnetic field in microteslas.
     public var x: Double
@@ -107,7 +112,7 @@ public struct MagnetometerEvent {
     public var timestamp: TimeInterval
 
     #if SKIP
-    // https://developer.android.com/reference/android/hardware/SensorEvent#values
+    // https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_magnetic_field:
     init(event: SensorEvent) {
         self.x = event.values[0].toDouble()
         self.y = event.values[1].toDouble()

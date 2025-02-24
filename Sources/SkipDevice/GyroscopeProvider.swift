@@ -97,6 +97,10 @@ public class GyroscopeProvider {
 }
 
 /// A data sample from the device's three gyroscopes.
+///
+/// Encapsulates:
+/// - Darwin: [CMGyroData](https://developer.apple.com/documentation/coremotion/cmgyrodata)
+/// - Android: [Sensor.TYPE_GYROSCOPE](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_gyroscope:)
 public struct GyroscopeEvent {
     /// Angular speed around the x-axis
     public var x: Double
@@ -108,7 +112,7 @@ public struct GyroscopeEvent {
     public var timestamp: TimeInterval
 
     #if SKIP
-    // https://developer.android.com/reference/android/hardware/SensorEvent#values
+    // https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_gyroscope:
     init(event: SensorEvent) {
         self.x = event.values[0].toDouble()
         self.y = event.values[1].toDouble()
