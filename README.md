@@ -32,6 +32,51 @@ let location: LocationEvent = try await provider.fetchCurrentLocation()
 logger.log("latitude: \(location.latitude) longitude: \(location.longitude) altitude: \(location.altitude)")
 ```
 
+You can also subscribe to a stream of location updates like so:
+
+```swift
+import SwiftUI
+import SwiftKit // for PermissionManager
+import SkipDevice
+
+struct LocationView : View {
+    @State var event: LocationEvent?
+
+    var body: some View {
+        VStack {
+            if let event = event {
+                Text("latitude: \(event.latitude)")
+                Text("longitude: \(event.longitude)")
+                Text("altitude: \(event.altitude)")
+                Text("course: \(event.course)")
+                Text("speed: \(event.speed)")
+            }
+        }
+        .font(Font.body.monospaced())
+        .task {
+            // SkipKit provided PermissionManager, which creates a user-interface to request individual permissions
+            if await PermissionManager.requestLocationPermission(precise: true, always: false).isAuthorized == false {
+                logger.warning("permission refused for ACCESS_FINE_LOCATION")
+                return
+            }
+
+            let provider = LocationProvider() // must retain reference
+            provider.updateInterval = 1.0
+            do {
+                for try await event in provider.monitor() {
+                    self.event = event
+                    // if cancelled { break }
+                }
+            } catch {
+                logger.error("error updating location: \(error)")
+            }
+            provider.stop()
+        }
+    }
+}
+```
+
+
 ### Location Permissions
 
 In order to access the device's location, you will need to 
@@ -50,6 +95,7 @@ On iOS, you will need to add the `NSLocationWhenInUseUsageDescription` key to yo
 ```
 INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to …"
 ```
+
 
 ## Motion
 
