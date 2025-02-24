@@ -64,7 +64,7 @@ INFOPLIST_KEY_NSMotionUsageDescription = "This app uses your motion information 
 
 ## Accelerometer
 
-The `AccelerometerProvider` type provides an `AsyncStream<AccelerometerEvent>` of device accelerometer changes.
+The `AccelerometerProvider` type provides an `AsyncThrowingStream<AccelerometerEvent, Event>` of device accelerometer changes.
 
 It can be used in a View like this:
 
@@ -85,9 +85,14 @@ struct AccelerometerView : View {
         }
         .task {
             let provider = AccelerometerProvider() // must retain reference
-            for await event in provider.monitor() {
-                self.event = event
-                // if cancelled { break }
+            provider.updateInterval = 0.1
+            do {
+                for try await event in provider.monitor() {
+                    self.event = event
+                    // if cancelled { break }
+                }
+            } catch {
+                logger.error("error updating accelerometer: \(error)")
             }
             provider.stop()
         }
@@ -97,7 +102,7 @@ struct AccelerometerView : View {
 
 ## Gyroscope
 
-The `GyroscopeProvider` type provides an `AsyncStream<GyroscopeEvent>` of device gyroscope changes.
+The `GyroscopeProvider` type provides an `AsyncThrowingStream<GyroscopeEvent, Event>` of device gyroscope changes.
 
 It can be used in a View like this:
 
@@ -118,9 +123,14 @@ struct GyroscopeView : View {
         }
         .task {
             let provider = GyroscopeProvider() // must retain reference
-            for await event in provider.monitor() {
-                self.event = event
-                // if cancelled { break }
+            provider.updateInterval = 0.1
+            do {
+                for try await event in provider.monitor() {
+                    self.event = event
+                    // if cancelled { break }
+                }
+            } catch {
+                logger.error("error updating gyroscope: \(error)")
             }
             provider.stop()
         }
@@ -131,7 +141,7 @@ struct GyroscopeView : View {
 
 ## Magnetometer
 
-The `MagnetometerProvider` type provides an `AsyncStream<MagnetometerEvent>` of device magnetometer changes.
+The `MagnetometerProvider` type provides an `AsyncThrowingStream<MagnetometerEvent, Error>` of device magnetometer changes.
 
 It can be used in a View like this:
 
@@ -153,9 +163,14 @@ struct MagnetometerView : View {
         .font(Font.body.monospaced())
         .task {
             let provider = MagnetometerProvider() // must retain reference
-            for await event in provider.monitor() {
-                self.event = event
-                // if cancelled { break }
+            provider.updateInterval = 0.1
+            do {
+                for try await event in provider.monitor() {
+                    self.event = event
+                    // if cancelled { break }
+                }
+            } catch {
+                logger.error("error updating magnetometer: \(error)")
             }
             provider.stop()
         }
@@ -166,7 +181,7 @@ struct MagnetometerView : View {
 
 ## Barometer
 
-The `BarometerProvider` type provides an `AsyncStream<BarometerEvent>` of device barometer changes.
+The `BarometerProvider` type provides an `AsyncThrowingStream<BarometerEvent, Event>` of device barometer changes.
 
 It can be used in a View like this:
 
@@ -187,9 +202,14 @@ struct BarometerView : View {
         .font(Font.body.monospaced())
         .task {
             let provider = BarometerProvider() // must retain reference
-            for await event in provider.monitor() {
-                self.event = event
-                // if cancelled { break }
+            provider.updateInterval = 0.1
+            do {
+                for try await event in provider.monitor() {
+                    self.event = event
+                    // if cancelled { break }
+                }
+            } catch {
+                logger.error("error updating barometer: \(error)")
             }
             provider.stop()
         }
