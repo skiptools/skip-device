@@ -27,6 +27,8 @@ public class BarometerProvider {
     #elseif os(iOS) || os(watchOS)
     private let altimeter = CMAltimeter()
     #endif
+    /// Set the update interval for the magnetometer. Must be set before `monitor()` is invoked.
+    public var updateInterval: TimeInterval?
 
     public init() {
     }
@@ -34,9 +36,6 @@ public class BarometerProvider {
     deinit {
         stop()
     }
-
-    /// Set the update interval for the magnetometer. Must be set before `monitor()` is invoked.
-    public var updateInterval: TimeInterval?
 
     /// Returns `true` if the barometer is available on this device
     public var isAvailable: Bool {
@@ -62,34 +61,25 @@ public class BarometerProvider {
     }
 
     // SKIP @nobridge // 'AsyncStream<BarometerEvent>' is not a bridged type
-    public func monitor() -> AsyncStream<BarometerEvent> {
+    public func monitor() -> AsyncThrowingStream<BarometerEvent, Error> {
         logger.debug("starting barometer monitor")
-        let (stream, continuation) = AsyncStream.makeStream(of: BarometerEvent.self)
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: BarometerEvent.self)
 
         #if SKIP
-        if let sensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE) {
-            listener = SensorEventHandler(onSensorChangedCallback: { event in
-                if self.referencePressure == nil {
-                    // remember the initial reading so we can calculate relative altitiude
-                    self.referencePressure = event.values[0]
-                }
-                continuation.yield(BarometerEvent(event: event, referencePressure: referencePressure!))
-            })
-
-            // The rate sensor events are delivered at. This is only a hint to the system. Events may be received faster or slower than the specified rate. Usually events are received faster. The value must be one of SENSOR_DELAY_NORMAL, SENSOR_DELAY_UI, SENSOR_DELAY_GAME, or SENSOR_DELAY_FASTEST or, the desired delay between events in microseconds.
-            var interval = SensorManager.SENSOR_DELAY_NORMAL
-            if let updateInterval {
-                interval = Int(updateInterval * 1_000_000) // microseconds
+        listener = sensorManager.startSensorUpdates(type: Sensor.TYPE_PRESSURE, interval: updateInterval) { event in
+            if self.referencePressure == nil {
+                // remember the initial reading so we can calculate relative altitiude
+                self.referencePressure = event.values[0]
             }
-            sensorManager.registerListener(listener, sensor, interval)
+            continuation.yield(BarometerEvent(event: event, referencePressure: referencePressure!))
         }
         #elseif os(iOS) || os(watchOS)
         altimeter.startRelativeAltitudeUpdates(to: OperationQueue.main) { data, error in
             if let error = error {
                 logger.debug("barometer update error: \(error)")
-                //continuation.finish(throwing: error) // would need to be AsyncThrowingStream
+                continuation.yield(with: .failure(error))
             } else if let data = data {
-                continuation.yield(BarometerEvent(data: data))
+                continuation.yield(with: .success(BarometerEvent(data: data)))
             }
         }
         #endif

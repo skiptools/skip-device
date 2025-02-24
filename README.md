@@ -24,7 +24,7 @@ On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited t
 
 ## Location
 
-You can request the current device location with:
+You can request a single current device location with:
 
 ```swift
 let provider = LocationProvider()
@@ -37,10 +37,12 @@ logger.log("latitude: \(location.latitude) longitude: \(location.longitude) alti
 In order to access the device's location, you will need to 
 declare the permissions in the app's metadata.
 
-On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited to include:
+On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited to include one of the
+following permissions:
 
 ```
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 ```
 
 On iOS, you will need to add the `NSLocationWhenInUseUsageDescription` key to your `Darwin/AppName.xcconfig` file:
@@ -100,6 +102,9 @@ The `GyroscopeProvider` type provides an `AsyncStream<GyroscopeEvent>` of device
 It can be used in a View like this:
 
 ```swift
+import SwiftUI
+import SkipDevice
+
 struct GyroscopeView : View {
     @State var event: GyroscopeEvent?
 
@@ -131,15 +136,18 @@ The `MagnetometerProvider` type provides an `AsyncStream<MagnetometerEvent>` of 
 It can be used in a View like this:
 
 ```swift
+import SwiftUI
+import SkipDevice
+
 struct MagnetometerView : View {
     @State var event: MagnetometerEvent?
 
     var body: some View {
         VStack {
             if let event = event {
-                Text("x: \(event.x)")
-                Text("y: \(event.y)")
-                Text("z: \(event.z)")
+                Text("x: \(event.x)") // X-axis magnetic field in microteslas
+                Text("y: \(event.y)") // Y-axis magnetic field in microteslas
+                Text("z: \(event.z)") // Z-axis magnetic field in microteslas
             }
         }
         .font(Font.body.monospaced())
@@ -163,6 +171,9 @@ The `BarometerProvider` type provides an `AsyncStream<BarometerEvent>` of device
 It can be used in a View like this:
 
 ```swift
+import SwiftUI
+import SkipDevice
+
 struct BarometerView : View {
     @State var event: BarometerEvent?
 
