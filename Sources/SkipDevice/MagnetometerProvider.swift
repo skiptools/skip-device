@@ -67,7 +67,6 @@ public class MagnetometerProvider {
         #endif
     }
 
-    // SKIP @nobridge // 'AsyncStream<MagnetometerEvent>' is not a bridged type
     public func monitor() -> AsyncThrowingStream<MagnetometerEvent, Error> {
         logger.debug("starting magnetometer monitor")
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: MagnetometerEvent.self)

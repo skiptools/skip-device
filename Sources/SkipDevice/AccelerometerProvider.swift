@@ -67,7 +67,6 @@ public class AccelerometerProvider {
         #endif
     }
 
-    // SKIP @nobridge // 'AsyncStream<AccelerometerEvent>' is not a bridged type
     public func monitor() -> AsyncThrowingStream<AccelerometerEvent, Error> {
         logger.debug("starting accelerometer monitor")
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: AccelerometerEvent.self)

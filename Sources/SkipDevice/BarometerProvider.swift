@@ -60,7 +60,6 @@ public class BarometerProvider {
         #endif
     }
 
-    // SKIP @nobridge // 'AsyncStream<BarometerEvent>' is not a bridged type
     public func monitor() -> AsyncThrowingStream<BarometerEvent, Error> {
         logger.debug("starting barometer monitor")
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: BarometerEvent.self)
