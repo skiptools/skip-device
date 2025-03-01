@@ -66,7 +66,6 @@ public class LocationProvider: NSObject {
         #endif
     }
 
-    // SKIP @nobridge // 'AsyncThrowingStream<LocationEvent, Error>' is not a bridged type
     public func monitor() -> AsyncThrowingStream<LocationEvent, Error> {
         logger.debug("starting location monitor")
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: LocationEvent.self)
