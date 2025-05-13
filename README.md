@@ -96,7 +96,6 @@ On iOS, you will need to add the `NSLocationWhenInUseUsageDescription` key to yo
 INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to …"
 ```
 
-
 ## Motion
 
 ### Motion Permissions
