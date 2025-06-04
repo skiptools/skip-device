@@ -36,7 +36,7 @@ You can also subscribe to a stream of location updates like so:
 
 ```swift
 import SwiftUI
-import SwiftKit // for PermissionManager
+import SkipKit // for PermissionManager
 import SkipDevice
 
 struct LocationView : View {
