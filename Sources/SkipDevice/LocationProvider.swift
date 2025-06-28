@@ -35,6 +35,7 @@ public class LocationProvider: NSObject {
     private var callback: ((Result<LocationEvent, Error>) -> Void)?
     #endif
 
+    // SKIP @nooverride
     public override init() {
         super.init()
         #if !SKIP
