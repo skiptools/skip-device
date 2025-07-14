@@ -212,17 +212,18 @@ public struct LocationEvent {
     #if SKIP
     /// https://developer.android.com/reference/android/location/Location
     init(location: android.location.Location) {
-        self.latitude = location.latitude
-        self.longitude = location.longitude
-        self.horizontalAccuracy = location.accuracy.toDouble()
-        self.altitude = location.mslAltitudeMeters
-        self.ellipsoidalAltitude = location.altitude
-        self.verticalAccuracy = location.verticalAccuracyMeters.toDouble()
-        self.speed = location.speed.toDouble()
-        self.speedAccuracy = location.speedAccuracyMetersPerSecond.toDouble()
-        self.course = location.bearing.toDouble()
-        self.courseAccuracy = location.bearingAccuracyDegrees.toDouble()
-        self.timestamp = location.time.toDouble() / 1_000.0
+        self.latitude = location.getLatitude()
+        self.longitude = location.getLongitude()
+        // some accessors may fail with precondition exceptions like `java.lang.IllegalStateException: The Mean Sea Level altitude of this location is not set.`, so we defensively check whether the property is set and fallback to empty values
+        self.horizontalAccuracy = location.hasAccuracy() ? location.getAccuracy().toDouble() : 0.0
+        self.altitude = location.hasMslAltitude() ? location.getMslAltitudeMeters() : 0.0
+        self.ellipsoidalAltitude = location.hasAltitude() ? location.getAltitude() : 0.0
+        self.verticalAccuracy = location.hasVerticalAccuracy() ? location.getVerticalAccuracyMeters().toDouble() : 0.0
+        self.speed = location.hasSpeed() ? location.getSpeed().toDouble() : 0.0
+        self.speedAccuracy = location.hasSpeedAccuracy() ? location.getSpeedAccuracyMetersPerSecond().toDouble() : 0.0
+        self.course = location.hasBearing() ? location.getBearing().toDouble() : 0.0
+        self.courseAccuracy = location.hasBearingAccuracy() ? location.getBearingAccuracyDegrees().toDouble() : 0.0
+        self.timestamp = location.getTime().toDouble() / 1_000.0
     }
     #else
     /// https://developer.apple.com/documentation/corelocation/cllocation
