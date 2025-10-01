@@ -3,6 +3,28 @@
 The SkipDevice module is a dual-platform Skip framework that provides access to 
 network reachability, location, and device sensor data.
 
+## Setup
+
+To include this framework in your project, add the following
+dependency to your `Package.swift` file:
+
+```swift
+let package = Package(
+    name: "my-package",
+    products: [
+        .library(name: "MyProduct", targets: ["MyTarget"]),
+    ],
+    dependencies: [
+        .package(url: "https://source.skip.tools/skip-device.git", "0.0.0"..<"2.0.0"),
+    ],
+    targets: [
+        .target(name: "MyTarget", dependencies: [
+            .product(name: "SkipDevice", package: "skip-device")
+        ])
+    ]
+)
+```
+
 ## Network Reachability
 
 You can check whether the device is currenly able to access the network with:
