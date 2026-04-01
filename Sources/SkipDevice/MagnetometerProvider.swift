@@ -29,7 +29,7 @@ public class MagnetometerProvider {
         didSet {
             #if os(iOS) || os(watchOS)
             if let interval = updateInterval {
-                motionManager.magnetometerUpdateInterval = interval
+                motionManager.deviceMotionUpdateInterval = interval
             }
             #endif
         }
@@ -48,7 +48,7 @@ public class MagnetometerProvider {
         #if SKIP
         return sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD) != nil
         #elseif os(iOS) || os(watchOS)
-        return motionManager.isMagnetometerAvailable
+        return motionManager.isMagnetometerAvailable && motionManager.isDeviceMotionAvailable
         #else
         return false // macOS, etc.
         #endif
@@ -61,7 +61,7 @@ public class MagnetometerProvider {
             listener = nil
         }
         #elseif os(iOS) || os(watchOS)
-        motionManager.stopMagnetometerUpdates()
+        motionManager.stopDeviceMotionUpdates()
         #endif
     }
 
@@ -74,12 +74,15 @@ public class MagnetometerProvider {
             continuation.yield(MagnetometerEvent(event: event))
         }
         #elseif os(iOS) || os(watchOS)
-        motionManager.startMagnetometerUpdates(to: OperationQueue.main) { data, error in
+        // Use CMDeviceMotion to get calibrated magnetic field data (hard iron bias removed),
+        // matching Android's TYPE_MAGNETIC_FIELD which also returns calibrated values.
+        // Raw CMMagnetometerData includes device bias that makes values differ from Android.
+        motionManager.startDeviceMotionUpdates(using: .xMagneticNorthZVertical, to: OperationQueue.main) { motion, error in
             if let error = error {
                 logger.debug("magnetometer update error: \(error)")
                 continuation.yield(with: .failure(error))
-            } else if let data = data {
-                continuation.yield(with: .success(MagnetometerEvent(data: data)))
+            } else if let motion = motion {
+                continuation.yield(with: .success(MagnetometerEvent(motion: motion)))
             }
         }
         #endif
@@ -95,9 +98,9 @@ public class MagnetometerProvider {
 
 /// A data sample from the device's magnetometer.
 ///
-/// Encapsulates:
-/// - Darwin: [CMMagnetometerData](https://developer.apple.com/documentation/coremotion/cmmagnetometerdata)
-/// - Android: [Sensor.TYPE_MAGNETIC_FIELD](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_magnetic_field:)
+/// Encapsulates calibrated magnetic field values:
+/// - Darwin: [CMDeviceMotion.magneticField](https://developer.apple.com/documentation/coremotion/cmdevicemotion/magneticfield) (calibrated, device bias removed)
+/// - Android: [Sensor.TYPE_MAGNETIC_FIELD](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_magnetic_field:) (calibrated)
 public struct MagnetometerEvent {
     /// X-axis magnetic field in microteslas.
     public var x: Double
@@ -118,12 +121,14 @@ public struct MagnetometerEvent {
 
     }
     #elseif os(iOS) || os(watchOS)
-    // https://developer.apple.com/documentation/coremotion/cmmagnetometerdata
-    init(data: CMMagnetometerData) {
-        self.x = data.magneticField.x
-        self.y = data.magneticField.y
-        self.z = data.magneticField.z
-        self.timestamp = data.timestamp
+    // https://developer.apple.com/documentation/coremotion/cmdevicemotion/magneticfield
+    // Uses calibrated CMDeviceMotion.magneticField.field (device bias removed)
+    // to match Android TYPE_MAGNETIC_FIELD which also returns calibrated values.
+    init(motion: CMDeviceMotion) {
+        self.x = motion.magneticField.field.x
+        self.y = motion.magneticField.field.y
+        self.z = motion.magneticField.field.z
+        self.timestamp = motion.timestamp
     }
     #endif
 }
