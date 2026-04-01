@@ -51,7 +51,7 @@ public class LocationProvider: NSObject {
     /// Returns `true` if the location is available on this device
     public var isAvailable: Bool {
         #if SKIP
-        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        return locationManager.isProviderEnabled(LocationManager.FUSED_PROVIDER) || locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         #else
         return CLLocationManager.locationServicesEnabled()
         #endif
@@ -81,7 +81,7 @@ public class LocationProvider: NSObject {
         // https://developer.android.com/reference/android/location/LocationRequest.Builder
         let request = LocationRequest.Builder(intervalMillis).build() // TODO: setQuality, etc.
         do {
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, request, ProcessInfo.processInfo.androidContext.mainExecutor, listener!)
+            locationManager.requestLocationUpdates(LocationManager.FUSED_PROVIDER, request, ProcessInfo.processInfo.androidContext.mainExecutor, listener!)
         } catch {
             logger.error("error requesting location updates: \(error) ")
             continuation.yield(with: .failure(error))
@@ -143,7 +143,7 @@ public class LocationProvider: NSObject {
             }
 
             logger.info("locationManager.requestSingleUpdate")
-            locationManager.requestSingleUpdate(android.location.LocationManager.GPS_PROVIDER, locationListener, Looper.getMainLooper())
+            locationManager.requestSingleUpdate(android.location.LocationManager.FUSED_PROVIDER, locationListener, Looper.getMainLooper())
         }
         let _ = locationListener // need to hold the reference so it doesn't get gc'd
         return location
@@ -152,8 +152,14 @@ public class LocationProvider: NSObject {
 }
 
 #if SKIP
-struct LocListener : LocationListener {
+class LocListener : LocationListener {
     var callback: (LocationEvent) -> Void = { _ in }
+
+    init() {}
+
+    init(callback: @escaping (LocationEvent) -> Void) {
+        self.callback = callback
+    }
 
     override func onLocationChanged(location: android.location.Location) {
         callback(LocationEvent(location: location))

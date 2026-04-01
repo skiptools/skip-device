@@ -35,7 +35,7 @@ let isReachable: Bool = networkReachability.isNetworkReachable
 
 ### Network Reachability Permissions
 
-In order to access the device's photos or media library, you will need to 
+In order to access the network reachability status, you will need to 
 declare the permissions in the app's metadata.
 
 On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited to include:
@@ -299,7 +299,7 @@ On Android, the `app/src/main/AndroidManifest.xml` file will need to be edited t
 ## Building
 
 This project is a Swift Package Manager module that uses the
-[Skip](https://skip.dev) plugin to transpile Swift into Kotlin.
+[Skip](https://skip.dev) plugin to build the package for both iOS and Android.
 
 Building the module requires that Skip be installed using 
 [Homebrew](https://brew.sh) with `brew install skiptools/skip/skip`.
