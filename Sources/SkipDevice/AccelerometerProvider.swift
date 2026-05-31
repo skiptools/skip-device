@@ -17,7 +17,7 @@ import android.hardware.SensorEvent
 private let logger: Logger = Logger(subsystem: "skip.device", category: "AccelerometerProvider") // adb logcat '*:S' 'skip.device.AccelerometerProvider:V'
 
 /// A provider for device accelerometer events.
-public class AccelerometerProvider {
+public final class AccelerometerProvider: @unchecked Sendable {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private var listener: SensorEventHandler? = nil
@@ -98,7 +98,7 @@ public class AccelerometerProvider {
 /// Encapsulates:
 /// - Darwin: [CMAccelerometerData](https://developer.apple.com/documentation/coremotion/cmaccelerometerdata)
 /// - Android: [Sensor.TYPE_ACCELEROMETER](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_accelerometer:)
-public struct AccelerometerEvent {
+public struct AccelerometerEvent: Hashable, Sendable {
     /// X-axis acceleration in G's (gravitational force).
     public var x: Double
     /// Y-axis acceleration in G's (gravitational force).

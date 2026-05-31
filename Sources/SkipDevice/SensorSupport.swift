@@ -38,7 +38,7 @@ extension SensorManager {
     }
 }
 
-struct SensorEventHandler: SensorEventListener2 {
+internal struct SensorEventHandler: SensorEventListener2 {
     let onSensorChangedCallback: (_ event: SensorEvent) -> ()
     let onAccuracyChangedCallback: (_ sensor: Sensor, _ accuracy: Int) -> () = { _, _ in }
     let onFlushCompletedCallback: (_ sensor: Sensor) -> () = { _ in }

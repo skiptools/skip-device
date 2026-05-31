@@ -17,7 +17,7 @@ import android.hardware.SensorEvent
 private let logger: Logger = Logger(subsystem: "skip.device", category: "BarometerProvider") // adb logcat '*:S' 'skip.device.BarometerProvider:V'
 
 /// A provider for device Barometer events.
-public class BarometerProvider {
+public final class BarometerProvider: @unchecked Sendable {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private var listener: SensorEventHandler? = nil
@@ -95,7 +95,7 @@ public class BarometerProvider {
 /// Encapsulates:
 /// - Darwin: [CMAltitudeData](https://developer.apple.com/documentation/coremotion/cmaltitudedata)
 /// - Android: [Sensor.TYPE_PRESSURE](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_pressure:)
-public struct BarometerEvent {
+public struct BarometerEvent: Hashable, Sendable {
     /// The recorded pressure, in kilopascals.
     public var pressure: Double
     /// The change in altitude (in meters) since the first reported event.
