@@ -27,7 +27,7 @@ private let logger: Logger = Logger(subsystem: "skip.device", category: "Locatio
 ///
 /// Requires `INFOPLIST_KEY_NSLocationWhenInUseUsageDescription` in `App.xcconfig` and
 /// `<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>` in `AndroidManifest.xml`.
-public class LocationProvider: NSObject {
+public final class LocationProvider: NSObject, @unchecked Sendable {
     #if SKIP
     private let locationManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var listener: LocListener?
@@ -199,7 +199,7 @@ public struct LocationError : LocalizedError {
 }
 
 /// A lat/lon location (in degrees).
-public struct LocationEvent {
+public struct LocationEvent: Hashable, Sendable {
     public var latitude: Double
     public var longitude: Double
     public var horizontalAccuracy: Double

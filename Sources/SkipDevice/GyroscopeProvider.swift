@@ -17,7 +17,7 @@ import android.hardware.SensorEvent
 private let logger: Logger = Logger(subsystem: "skip.device", category: "GyroscopeProvider") // adb logcat '*:S' 'skip.device.GyroscopeProvider:V'
 
 /// A provider for device gyroscope events.
-public class GyroscopeProvider {
+public final class GyroscopeProvider: @unchecked Sendable {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private var listener: SensorEventHandler? = nil
@@ -98,7 +98,7 @@ public class GyroscopeProvider {
 /// Encapsulates:
 /// - Darwin: [CMGyroData](https://developer.apple.com/documentation/coremotion/cmgyrodata)
 /// - Android: [Sensor.TYPE_GYROSCOPE](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_gyroscope:)
-public struct GyroscopeEvent {
+public struct GyroscopeEvent: Hashable, Sendable {
     /// Angular speed around the x-axis
     public var x: Double
     /// Angular speed around the y-axis

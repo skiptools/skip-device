@@ -17,7 +17,7 @@ import android.hardware.SensorEvent
 private let logger: Logger = Logger(subsystem: "skip.device", category: "MagnetometerProvider") // adb logcat '*:S' 'skip.device.MagnetometerProvider:V'
 
 /// A provider for device magnetometer events.
-public class MagnetometerProvider {
+public final class MagnetometerProvider: @unchecked Sendable {
     #if SKIP
     private let sensorManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private var listener: SensorEventHandler? = nil
@@ -101,7 +101,7 @@ public class MagnetometerProvider {
 /// Encapsulates calibrated magnetic field values:
 /// - Darwin: [CMDeviceMotion.magneticField](https://developer.apple.com/documentation/coremotion/cmdevicemotion/magneticfield) (calibrated, device bias removed)
 /// - Android: [Sensor.TYPE_MAGNETIC_FIELD](https://developer.android.com/reference/android/hardware/SensorEvent#sensor.type_magnetic_field:) (calibrated)
-public struct MagnetometerEvent {
+public struct MagnetometerEvent: Hashable, Sendable {
     /// X-axis magnetic field in microteslas.
     public var x: Double
     /// Y-axis magnetic field in microteslas.
