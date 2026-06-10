@@ -1,7 +1,7 @@
 # SkipDevice
 
 The SkipDevice module is a dual-platform [Skip](https://skip.dev) framework that provides access to
-network reachability, location services, app runtime events, finite background activity, and device sensor data (accelerometer, gyroscope, magnetometer, and barometer).
+network reachability, device identity, location services, app runtime events, finite background activity, and device sensor data (accelerometer, gyroscope, magnetometer, and barometer).
 
 On iOS, the module wraps [CoreMotion](https://developer.apple.com/documentation/coremotion) and [CoreLocation](https://developer.apple.com/documentation/corelocation). On Android, it wraps the [Sensor](https://developer.android.com/reference/android/hardware/SensorManager) and [Location](https://developer.android.com/reference/android/location/LocationManager) APIs. All sensor providers expose a unified `AsyncThrowingStream` interface that works identically on both platforms.
 
@@ -76,6 +76,24 @@ Android manifest entry:
 ```xml
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
+
+## Device Identity
+
+Read low-level device identity fields from the current platform.
+
+| | iOS / tvOS | Android |
+|---|---|---|
+| API | `UIDevice` | `Build`, `Settings.Global`, `Settings.Secure` |
+
+```swift
+import SkipDevice
+
+let identity = DeviceIdentity.current
+print(identity.name ?? "Unnamed device")
+print(identity.model ?? "Unknown model")
+```
+
+`vendorIdentifier` maps to `UIDevice.identifierForVendor` on Apple platforms and `Settings.Secure.ANDROID_ID` on Android. Treat it as privacy-sensitive app data; app-specific policy, disclosure, and storage choices remain app-owned.
 
 ## Location
 

@@ -14,6 +14,26 @@ final class SkipDeviceTests: XCTestCase {
         XCTAssertTrue(isReachable, "expected the network to be reachable")
     }
 
+    func testDeviceIdentityValueConstructionTrimsEmptyStrings() {
+        let identity = DeviceIdentity(
+            name: "  Pixel  ",
+            model: "  ",
+            systemName: "Android",
+            manufacturer: "Google"
+        )
+
+        XCTAssertEqual(identity.name, "Pixel")
+        XCTAssertNil(identity.model)
+        XCTAssertEqual(identity.systemName, "Android")
+        XCTAssertEqual(identity.manufacturer, "Google")
+    }
+
+    func testDeviceIdentityCurrentHasPlatformName() {
+        let identity = DeviceIdentity.current
+
+        XCTAssertNotNil(identity.systemName)
+    }
+
     func testBackgroundActivityRequestDefaults() {
         let request = BackgroundActivityRequest(name: "Sync")
         XCTAssertEqual(request.name, "Sync")
