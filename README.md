@@ -196,7 +196,7 @@ let provider = ApplicationRuntimeProvider()
 
 Task {
     for await event in provider.monitorLifecycle() {
-        print("phase: \(event.phase.rawValue)")
+        print("event: \(event.kind.rawValue), phase: \(event.phase.rawValue)")
     }
 }
 
@@ -207,7 +207,7 @@ Task {
 }
 ```
 
-Call `provider.stop()` when the owning feature no longer needs runtime events. Unsupported Apple platforms compile and report `.unknown` lifecycle phase with no platform callbacks.
+`event.kind` preserves an iOS-style lifecycle event name where possible, while `event.phase` gives callers a normalized foreground/background phase. Call `provider.stop()` when the owning feature no longer needs runtime events. Unsupported Apple platforms compile and report `.unknown` lifecycle phase with no platform callbacks.
 
 Android memory pressure maps `onLowMemory`, `TRIM_MEMORY_RUNNING_CRITICAL`, and `TRIM_MEMORY_COMPLETE` to `.critical`; other trim-memory pressure callbacks map to `.warning`.
 

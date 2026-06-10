@@ -46,11 +46,19 @@ final class SkipDeviceTests: XCTestCase {
         var iterator = provider.monitorLifecycle().makeAsyncIterator()
         _ = await iterator.next()
 
-        provider.publishLifecycle(ApplicationLifecyclePhase.background)
+        provider.publishLifecycle(ApplicationLifecycleEventKind.didEnterBackground)
 
         let event = await iterator.next()
+        XCTAssertEqual(event?.kind, ApplicationLifecycleEventKind.didEnterBackground)
         XCTAssertEqual(event?.phase, ApplicationLifecyclePhase.background)
         provider.stop()
+    }
+
+    func testApplicationLifecycleEventPhaseInitializerSetsMatchingKind() {
+        let event = ApplicationLifecycleEvent(phase: ApplicationLifecyclePhase.active)
+
+        XCTAssertEqual(event.kind, ApplicationLifecycleEventKind.didBecomeActive)
+        XCTAssertEqual(event.phase, ApplicationLifecyclePhase.active)
     }
 
     func testApplicationRuntimeProviderPublishesMemoryPressureEvents() async {

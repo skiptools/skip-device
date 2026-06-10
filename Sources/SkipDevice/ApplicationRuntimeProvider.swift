@@ -29,11 +29,14 @@ public final class ApplicationRuntimeProvider: @unchecked Sendable {
     private let lock = NSLock()
     private var lifecycleMonitors: [LifecycleMonitor] = []
     private var memoryMonitors: [MemoryMonitor] = []
-    private var lifecyclePhase: ApplicationLifecyclePhase = .unknown
+    private var lifecycleEvent = ApplicationLifecycleEvent(
+        kind: ApplicationLifecycleEventKind.unknown,
+        phase: ApplicationLifecyclePhase.unknown
+    )
 
     public init() {
         #if !SKIP
-        lifecyclePhase = Self.initialLifecyclePhase()
+        lifecycleEvent = ApplicationLifecycleEvent(phase: Self.initialLifecyclePhase())
         #endif
         start()
     }
@@ -45,7 +48,7 @@ public final class ApplicationRuntimeProvider: @unchecked Sendable {
     /// The most recently observed app lifecycle phase.
     public var currentLifecyclePhase: ApplicationLifecyclePhase {
         lock.lock()
-        let phase = lifecyclePhase
+        let phase = lifecycleEvent.phase
         lock.unlock()
         return phase
     }
@@ -64,9 +67,9 @@ public final class ApplicationRuntimeProvider: @unchecked Sendable {
                     continuation.finish()
                 }
             ))
-            let phase = lifecyclePhase
+            let event = lifecycleEvent
             lock.unlock()
-            continuation.yield(ApplicationLifecycleEvent(phase: phase))
+            continuation.yield(event)
             continuation.onTermination = { [weak self] _ in
                 self?.removeLifecycleContinuation(id)
             }
@@ -123,8 +126,30 @@ public final class ApplicationRuntimeProvider: @unchecked Sendable {
 
     func publishLifecycle(_ phase: ApplicationLifecyclePhase) {
         let event = ApplicationLifecycleEvent(phase: phase)
+        publishLifecycle(kind: event.kind, phase: event.phase)
+    }
+
+    func publishLifecycle(_ kind: ApplicationLifecycleEventKind) {
+        let phase: ApplicationLifecyclePhase
+        switch kind {
+        case ApplicationLifecycleEventKind.didBecomeActive:
+            phase = ApplicationLifecyclePhase.active
+        case ApplicationLifecycleEventKind.willResignActive:
+            phase = ApplicationLifecyclePhase.inactive
+        case ApplicationLifecycleEventKind.didEnterBackground:
+            phase = ApplicationLifecyclePhase.background
+        case ApplicationLifecycleEventKind.willTerminate:
+            phase = ApplicationLifecyclePhase.terminated
+        case ApplicationLifecycleEventKind.unknown:
+            phase = ApplicationLifecyclePhase.unknown
+        }
+        publishLifecycle(kind: kind, phase: phase)
+    }
+
+    private func publishLifecycle(kind: ApplicationLifecycleEventKind, phase: ApplicationLifecyclePhase) {
+        let event = ApplicationLifecycleEvent(kind: kind, phase: phase)
         lock.lock()
-        lifecyclePhase = phase
+        lifecycleEvent = event
         let monitors = lifecycleMonitors
         lock.unlock()
         for monitor in monitors {
@@ -181,16 +206,16 @@ public final class ApplicationRuntimeProvider: @unchecked Sendable {
         #if canImport(UIKit)
         let center = NotificationCenter.default
         notificationObservers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { [weak self] _ in
-            self?.publishLifecycle(ApplicationLifecyclePhase.active)
+            self?.publishLifecycle(ApplicationLifecycleEventKind.didBecomeActive)
         })
         notificationObservers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) { [weak self] _ in
-            self?.publishLifecycle(ApplicationLifecyclePhase.inactive)
+            self?.publishLifecycle(ApplicationLifecycleEventKind.willResignActive)
         })
         notificationObservers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: nil) { [weak self] _ in
-            self?.publishLifecycle(ApplicationLifecyclePhase.background)
+            self?.publishLifecycle(ApplicationLifecycleEventKind.didEnterBackground)
         })
         notificationObservers.append(center.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: nil) { [weak self] _ in
-            self?.publishLifecycle(ApplicationLifecyclePhase.terminated)
+            self?.publishLifecycle(ApplicationLifecycleEventKind.willTerminate)
         })
         notificationObservers.append(center.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil) { [weak self] _ in
             self?.publishMemoryPressure(MemoryPressureLevel.warning)
@@ -245,6 +270,15 @@ public enum ApplicationLifecyclePhase: String, Hashable, Sendable {
     case unknown
 }
 
+/// A platform lifecycle event kind, named to match iOS lifecycle notifications where possible.
+public enum ApplicationLifecycleEventKind: String, Hashable, Sendable {
+    case didBecomeActive
+    case willResignActive
+    case didEnterBackground
+    case willTerminate
+    case unknown
+}
+
 /// A coarse memory pressure level.
 public enum MemoryPressureLevel: String, Hashable, Sendable {
     case warning
@@ -253,12 +287,36 @@ public enum MemoryPressureLevel: String, Hashable, Sendable {
 
 /// An app lifecycle event.
 public struct ApplicationLifecycleEvent: Hashable, Sendable {
+    /// The raw lifecycle event kind that was observed.
+    public var kind: ApplicationLifecycleEventKind
     /// The lifecycle phase that was observed.
     public var phase: ApplicationLifecyclePhase
     /// The event timestamp in seconds since 1970.
     public var timestamp: TimeInterval
 
+    public init(
+        kind: ApplicationLifecycleEventKind,
+        phase: ApplicationLifecyclePhase,
+        timestamp: TimeInterval = Date().timeIntervalSince1970
+    ) {
+        self.kind = kind
+        self.phase = phase
+        self.timestamp = timestamp
+    }
+
     public init(phase: ApplicationLifecyclePhase, timestamp: TimeInterval = Date().timeIntervalSince1970) {
+        switch phase {
+        case ApplicationLifecyclePhase.active:
+            self.kind = ApplicationLifecycleEventKind.didBecomeActive
+        case ApplicationLifecyclePhase.inactive:
+            self.kind = ApplicationLifecycleEventKind.willResignActive
+        case ApplicationLifecyclePhase.background:
+            self.kind = ApplicationLifecycleEventKind.didEnterBackground
+        case ApplicationLifecyclePhase.terminated:
+            self.kind = ApplicationLifecycleEventKind.willTerminate
+        case ApplicationLifecyclePhase.unknown:
+            self.kind = ApplicationLifecycleEventKind.unknown
+        }
         self.phase = phase
         self.timestamp = timestamp
     }
@@ -301,7 +359,7 @@ private final class ApplicationRuntimeAndroidObserver: Application.ActivityLifec
 
     override func onActivityResumed(activity: Activity) {
         resumedActivities += 1
-        provider?.publishLifecycle(ApplicationLifecyclePhase.active)
+        provider?.publishLifecycle(ApplicationLifecycleEventKind.didBecomeActive)
     }
 
     override func onActivityPaused(activity: Activity) {
@@ -309,7 +367,7 @@ private final class ApplicationRuntimeAndroidObserver: Application.ActivityLifec
             resumedActivities -= 1
         }
         if resumedActivities == 0 && startedActivities > 0 {
-            provider?.publishLifecycle(ApplicationLifecyclePhase.inactive)
+            provider?.publishLifecycle(ApplicationLifecycleEventKind.willResignActive)
         }
     }
 
@@ -318,13 +376,13 @@ private final class ApplicationRuntimeAndroidObserver: Application.ActivityLifec
             startedActivities -= 1
         }
         if startedActivities == 0 {
-            provider?.publishLifecycle(ApplicationLifecyclePhase.background)
+            provider?.publishLifecycle(ApplicationLifecycleEventKind.didEnterBackground)
         }
     }
 
     override func onActivityDestroyed(activity: Activity) {
         if activity.isFinishing && startedActivities == 0 {
-            provider?.publishLifecycle(ApplicationLifecyclePhase.terminated)
+            provider?.publishLifecycle(ApplicationLifecycleEventKind.willTerminate)
         }
     }
 
@@ -332,7 +390,7 @@ private final class ApplicationRuntimeAndroidObserver: Application.ActivityLifec
     override func onActivityStarted(activity: Activity) {
         startedActivities += 1
         if resumedActivities == 0 {
-            provider?.publishLifecycle(ApplicationLifecyclePhase.inactive)
+            provider?.publishLifecycle(ApplicationLifecycleEventKind.willResignActive)
         }
     }
     override func onActivitySaveInstanceState(activity: Activity, outState: android.os.Bundle) {}
