@@ -1,7 +1,7 @@
 # SkipDevice
 
 The SkipDevice module is a dual-platform [Skip](https://skip.dev) framework that provides access to
-network reachability, location services, and device sensor data (accelerometer, gyroscope, magnetometer, and barometer).
+network reachability, location services, app runtime events, finite background activity, and device sensor data (accelerometer, gyroscope, magnetometer, and barometer).
 
 On iOS, the module wraps [CoreMotion](https://developer.apple.com/documentation/coremotion) and [CoreLocation](https://developer.apple.com/documentation/corelocation). On Android, it wraps the [Sensor](https://developer.android.com/reference/android/hardware/SensorManager) and [Location](https://developer.android.com/reference/android/location/LocationManager) APIs. All sensor providers expose a unified `AsyncThrowingStream` interface that works identically on both platforms.
 
@@ -179,6 +179,91 @@ Android manifest entries:
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 ```
+
+## Application Runtime Events
+
+Monitor app lifecycle and memory pressure events through a single API on both platforms.
+
+| | iOS / tvOS | Android |
+|---|---|---|
+| Lifecycle API | `UIApplication` notifications | `Application.ActivityLifecycleCallbacks` |
+| Memory API | `UIApplication.didReceiveMemoryWarningNotification` | `ComponentCallbacks2` |
+
+```swift
+import SkipDevice
+
+let provider = ApplicationRuntimeProvider()
+
+Task {
+    for await event in provider.monitorLifecycle() {
+        print("phase: \(event.phase.rawValue)")
+    }
+}
+
+Task {
+    for await event in provider.monitorMemoryPressure() {
+        print("memory pressure: \(event.level.rawValue)")
+    }
+}
+```
+
+Call `provider.stop()` when the owning feature no longer needs runtime events. Unsupported Apple platforms compile and report `.unknown` lifecycle phase with no platform callbacks.
+
+Android memory pressure maps `onLowMemory`, `TRIM_MEMORY_RUNNING_CRITICAL`, and `TRIM_MEMORY_COMPLETE` to `.critical`; other trim-memory pressure callbacks map to `.warning`.
+
+## Background Activity
+
+Begin and end finite user-visible background work. This is not a guarantee of indefinite execution: the app still owns completing work promptly and ending the activity.
+
+```swift
+import SkipDevice
+
+let identifier = try await BackgroundActivity.begin(BackgroundActivityRequest(
+    name: "Syncing media",
+    reason: BackgroundActivityReason.localNetworkTransfer,
+    detail: "Keeping the transfer active"
+))
+
+await performTransfer()
+await BackgroundActivity.end(identifier)
+```
+
+Use `do` / `catch` or task cancellation handling in app code so `BackgroundActivity.end(_:)` runs on success, failure, and cancellation.
+
+### Background Activity Reasons
+
+| Reason | Android foreground service type |
+|---|---|
+| `localNetworkTransfer` | `dataSync` |
+| `mediaProcessing` | `mediaProcessing` on Android 15+, `dataSync` on older Android versions |
+| `connectedDeviceTransfer` | `connectedDevice` |
+| `shortCriticalWork` | `shortService` when available, `dataSync` on older Android versions |
+
+On iOS and tvOS, `BackgroundActivity` wraps `UIApplication.beginBackgroundTask(withName:expirationHandler:)` and `UIApplication.endBackgroundTask(_:)`.
+
+On Android, `BackgroundActivity` starts `skip.device.BackgroundActivityService` as a foreground service. Android 15 limits `dataSync` and `mediaProcessing` foreground services to 6 hours per 24 hours; the service implements `Service.onTimeout(int, int)` and stops promptly when Android reports a timeout.
+
+### Background Activity Android Manifest
+
+Apps using `BackgroundActivity` must declare the foreground service and the service-type permissions needed by their chosen reasons:
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+
+<application>
+    <service
+        android:name="skip.device.BackgroundActivityService"
+        android:exported="false"
+        android:foregroundServiceType="dataSync|mediaProcessing|connectedDevice|shortService" />
+</application>
+```
+
+`shortService` does not have a type-specific permission, but it still requires `FOREGROUND_SERVICE`. `connectedDevice` has additional Android runtime prerequisites depending on the device transport, such as Bluetooth, NFC, USB, or network-change capabilities. The app owns any extra runtime permissions required for its use case.
+
+The default Android notification icon resource is `ic_notification`. Apps can provide a different drawable resource through `BackgroundActivityRequest.notificationIconResourceName`. Notification text, icon design, Android notification permission flow, and Google Play foreground-service policy justification remain app-owned.
 
 ## Motion Sensors
 
@@ -424,6 +509,7 @@ Set `android:required="false"` so the app can still be installed on devices with
 |---|---|---|---|---|
 | Network Reachability | None | None | `ACCESS_NETWORK_STATE` | None |
 | Location | `NSLocationWhenInUseUsageDescription` | Yes (via `PermissionManager`) | `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` | Yes (via `PermissionManager`) |
+| Background Activity | None | None | `FOREGROUND_SERVICE` plus selected foreground-service type permissions | App-owned by use case |
 | Accelerometer | `NSMotionUsageDescription` | None | None | None |
 | Gyroscope | `NSMotionUsageDescription` | None | None | None |
 | Magnetometer | `NSMotionUsageDescription` | None | None | None |
