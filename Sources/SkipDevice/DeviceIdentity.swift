@@ -77,17 +77,22 @@ public struct DeviceIdentity: Hashable, Sendable {
             product: Build.PRODUCT
         )
         #elseif canImport(UIKit)
-        let device = UIDevice.current
-        return DeviceIdentity(
-            name: device.name,
-            model: device.model,
-            localizedModel: device.localizedModel,
-            systemName: device.systemName,
-            systemVersion: device.systemVersion,
-            vendorIdentifier: device.identifierForVendor?.uuidString,
-            manufacturer: "Apple",
-            brand: "Apple"
-        )
+        guard Thread.isMainThread else {
+            return appleFallbackIdentity()
+        }
+        return MainActor.assumeIsolated {
+            let device = UIDevice.current
+            return DeviceIdentity(
+                name: device.name,
+                model: device.model,
+                localizedModel: device.localizedModel,
+                systemName: device.systemName,
+                systemVersion: device.systemVersion,
+                vendorIdentifier: device.identifierForVendor?.uuidString,
+                manufacturer: "Apple",
+                brand: "Apple"
+            )
+        }
         #else
         return DeviceIdentity(
             name: Host.current().localizedName,
@@ -105,6 +110,34 @@ public struct DeviceIdentity: Hashable, Sendable {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+
+    #if !SKIP && canImport(UIKit)
+    private static func appleFallbackIdentity() -> DeviceIdentity {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return DeviceIdentity(
+            systemName: appleSystemName(),
+            systemVersion: "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)",
+            manufacturer: "Apple",
+            brand: "Apple"
+        )
+    }
+
+    private static func appleSystemName() -> String {
+        #if os(tvOS)
+        return "tvOS"
+        #elseif os(watchOS)
+        return "watchOS"
+        #elseif os(visionOS)
+        return "visionOS"
+        #elseif targetEnvironment(macCatalyst)
+        return "macOS"
+        #elseif os(iOS)
+        return "iOS"
+        #else
+        return "Apple"
+        #endif
+    }
+    #endif
 
     #if !SKIP && !canImport(UIKit)
     private static func machineIdentifier() -> String? {
