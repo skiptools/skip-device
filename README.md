@@ -1,9 +1,23 @@
 # SkipDevice
 
 The SkipDevice module is a dual-platform [Skip](https://skip.dev) framework that provides access to
-network reachability, location services, and device sensor data (accelerometer, gyroscope, magnetometer, and barometer).
+network reachability, device identity, location services, app runtime events, finite background activity,
+and device sensor data (accelerometer, gyroscope, magnetometer, and barometer).
 
-On iOS, the module wraps [CoreMotion](https://developer.apple.com/documentation/coremotion) and [CoreLocation](https://developer.apple.com/documentation/corelocation). On Android, it wraps the [Sensor](https://developer.android.com/reference/android/hardware/SensorManager) and [Location](https://developer.android.com/reference/android/location/LocationManager) APIs. All sensor providers expose a unified `AsyncThrowingStream` interface that works identically on both platforms.
+On Apple platforms, the module wraps platform APIs such as
+[UIKit](https://developer.apple.com/documentation/uikit),
+[CoreMotion](https://developer.apple.com/documentation/coremotion),
+[CoreLocation](https://developer.apple.com/documentation/corelocation), and
+[SystemConfiguration](https://developer.apple.com/documentation/systemconfiguration).
+On Android, it wraps platform APIs such as
+[`Build`](https://developer.android.com/reference/android/os/Build),
+[`Application`](https://developer.android.com/reference/android/app/Application),
+[`Service`](https://developer.android.com/reference/android/app/Service),
+[`SensorManager`](https://developer.android.com/reference/android/hardware/SensorManager),
+[`LocationManager`](https://developer.android.com/reference/android/location/LocationManager), and
+[`ConnectivityManager`](https://developer.android.com/reference/android/net/ConnectivityManager).
+
+All sensor providers expose a unified `AsyncThrowingStream` interface that works identically on both platforms.
 
 ## Setup
 
@@ -27,7 +41,7 @@ let package = Package(
 )
 ```
 
-## Usage Pattern
+## Sensor Usage Pattern
 
 All sensor providers follow the same pattern:
 
@@ -76,6 +90,39 @@ Android manifest entry:
 ```xml
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
+
+## Device Identity
+
+Read low-level device identity fields from the current platform.
+
+| | iOS / tvOS | Android |
+|---|---|---|
+| API | `UIDevice` | `Build`, `Settings.Global`, `Settings.Secure` |
+
+```swift
+import SkipDevice
+
+let identity = DeviceIdentity.current
+print(identity.name ?? "Unnamed device")
+print(identity.model ?? "Unknown model")
+```
+
+`vendorIdentifier` maps to `UIDevice.identifierForVendor` on Apple platforms and `Settings.Secure.ANDROID_ID` on Android. Treat it as privacy-sensitive app data; app-specific policy, disclosure, and storage choices remain app-owned.
+
+### DeviceIdentity Properties
+
+| Property | Description |
+|---|---|
+| `name` | User-visible device name when the platform exposes one |
+| `model` | Platform model string |
+| `localizedModel` | Localized Apple model string when available |
+| `systemName` | Platform operating system name |
+| `systemVersion` | Platform operating system version |
+| `vendorIdentifier` | App/vendor-scoped stable identifier when available |
+| `manufacturer` | Device manufacturer, such as `Apple`, `Google`, or `Samsung` |
+| `brand` | Android `Build.BRAND` when available |
+| `device` | Android `Build.DEVICE` when available |
+| `product` | Android `Build.PRODUCT` when available |
 
 ## Location
 
@@ -179,6 +226,112 @@ Android manifest entries:
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 ```
+
+## Application Runtime Events
+
+Monitor app lifecycle and memory pressure events through a single API on both platforms.
+
+| | iOS / tvOS | Android |
+|---|---|---|
+| Lifecycle API | `UIApplication` notifications | `Application.ActivityLifecycleCallbacks` |
+| Memory API | `UIApplication.didReceiveMemoryWarningNotification` | `ComponentCallbacks2` |
+
+```swift
+import SkipDevice
+
+let provider = ApplicationRuntimeProvider()
+
+Task {
+    for await event in provider.monitorLifecycle() {
+        print("event: \(event.kind.rawValue), phase: \(event.phase.rawValue)")
+    }
+}
+
+Task {
+    for await event in provider.monitorMemoryPressure() {
+        print("memory pressure: \(event.level.rawValue)")
+    }
+}
+```
+
+`event.kind` preserves an iOS-style lifecycle event name where possible, while `event.phase` gives callers a normalized foreground/background phase. Call `provider.stop()` when the owning feature no longer needs runtime events. Unsupported Apple platforms compile and report `.unknown` lifecycle phase with no platform callbacks.
+
+Android memory pressure maps `onLowMemory`, `TRIM_MEMORY_RUNNING_CRITICAL`, and `TRIM_MEMORY_COMPLETE` to `.critical`; other trim-memory pressure callbacks map to `.warning`.
+
+### Runtime Event Values
+
+| Type | Values |
+|---|---|
+| `ApplicationLifecyclePhase` | `active`, `inactive`, `background`, `terminated`, `unknown` |
+| `ApplicationLifecycleEventKind` | `didBecomeActive`, `willResignActive`, `didEnterBackground`, `willTerminate`, `unknown` |
+| `MemoryPressureLevel` | `warning`, `critical` |
+
+`monitorLifecycle()` immediately yields the most recently known lifecycle event. On Android this is initially `.unknown` until an activity lifecycle callback is observed. On Apple platforms, the initial phase is read from `UIApplication.shared.applicationState` when available on the main thread; otherwise it starts as `.unknown`.
+
+## Background Activity
+
+Begin and end finite user-visible background work. This is not a guarantee of indefinite execution: the app still owns completing work promptly and ending the activity.
+
+```swift
+import SkipDevice
+
+let identifier = try await BackgroundActivity.begin(BackgroundActivityRequest(
+    name: "Syncing media",
+    reason: BackgroundActivityReason.localNetworkTransfer,
+    detail: "Keeping the transfer active"
+))
+
+await performTransfer()
+await BackgroundActivity.end(identifier)
+```
+
+Use `do` / `catch` or task cancellation handling in app code so `BackgroundActivity.end(_:)` runs on success, failure, and cancellation.
+
+### BackgroundActivityRequest Properties
+
+| Property | Default | Description |
+|---|---|---|
+| `name` | Required | User-visible activity name |
+| `reason` | `shortCriticalWork` | Platform reason used to choose the Android foreground-service type |
+| `detail` | Empty string | Optional user-visible detail for the Android foreground notification |
+| `notificationChannelID` | `tools.skip.device.background_activity` | Android notification channel identifier |
+| `notificationID` | `41001` | Android foreground notification identifier |
+| `notificationIconResourceName` | `ic_notification` | Android drawable resource name for the foreground notification icon |
+
+### Background Activity Reasons
+
+| Reason | Android foreground service type |
+|---|---|
+| `localNetworkTransfer` | `dataSync` |
+| `mediaProcessing` | `mediaProcessing` on Android 15+, `dataSync` on older Android versions |
+| `connectedDeviceTransfer` | `connectedDevice` |
+| `shortCriticalWork` | `shortService` when available, `dataSync` on older Android versions |
+
+On iOS and tvOS, `BackgroundActivity` wraps `UIApplication.beginBackgroundTask(withName:expirationHandler:)` and `UIApplication.endBackgroundTask(_:)`.
+
+On Android, `BackgroundActivity` starts `skip.device.BackgroundActivityService` as a foreground service. Android 15 limits `dataSync` and `mediaProcessing` foreground services to 6 hours per 24 hours; the service implements `Service.onTimeout(int, int)` and stops promptly when Android reports a timeout.
+
+### Background Activity Android Manifest
+
+Apps using `BackgroundActivity` must declare the foreground service and the service-type permissions needed by their chosen reasons:
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+
+<application>
+    <service
+        android:name="skip.device.BackgroundActivityService"
+        android:exported="false"
+        android:foregroundServiceType="dataSync|mediaProcessing|connectedDevice|shortService" />
+</application>
+```
+
+`shortService` does not have a type-specific permission, but it still requires `FOREGROUND_SERVICE`. `connectedDevice` has additional Android runtime prerequisites depending on the device transport, such as Bluetooth, NFC, USB, or network-change capabilities. The app owns any extra runtime permissions required for its use case.
+
+The default Android notification icon resource is `ic_notification`. Apps can provide a different drawable resource through `BackgroundActivityRequest.notificationIconResourceName`. Notification text, icon design, Android notification permission flow, and Google Play foreground-service policy justification remain app-owned.
 
 ## Motion Sensors
 
@@ -420,10 +573,13 @@ Set `android:required="false"` so the app can still be installed on devices with
 
 ## Permissions Summary
 
-| Sensor | iOS Declaration | iOS Runtime | Android Declaration | Android Runtime |
+| Capability | iOS Declaration | iOS Runtime | Android Declaration | Android Runtime |
 |---|---|---|---|---|
 | Network Reachability | None | None | `ACCESS_NETWORK_STATE` | None |
+| Device Identity | None | None | None | None |
 | Location | `NSLocationWhenInUseUsageDescription` | Yes (via `PermissionManager`) | `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` | Yes (via `PermissionManager`) |
+| Application Runtime Events | None | None | None | None |
+| Background Activity | None | None | `FOREGROUND_SERVICE` plus selected foreground-service type permissions | App-owned by use case |
 | Accelerometer | `NSMotionUsageDescription` | None | None | None |
 | Gyroscope | `NSMotionUsageDescription` | None | None | None |
 | Magnetometer | `NSMotionUsageDescription` | None | None | None |
@@ -431,16 +587,19 @@ Set `android:required="false"` so the app can still be installed on devices with
 
 ## API Reference
 
-| Provider | Event Type | Key Properties | `isAvailable` | `updateInterval` |
+| API | Event / Value Type | Key Properties | `isAvailable` | `updateInterval` |
 |---|---|---|---|---|
 | `NetworkReachability` | -- | `.isNetworkReachable: Bool` (static) | -- | -- |
+| `DeviceIdentity` | `DeviceIdentity` | `.current`, name, model, system, vendor, Android build fields | -- | -- |
 | `LocationProvider` | `LocationEvent` | latitude, longitude, altitude, speed, course, accuracy | Yes | No (1s default) |
+| `ApplicationRuntimeProvider` | `ApplicationLifecycleEvent`, `MemoryPressureEvent` | lifecycle phase/kind, memory pressure level | -- | -- |
+| `BackgroundActivity` | `BackgroundActivityRequest` | `begin(_:)`, `end(_:)`, reason, notification metadata | -- | -- |
 | `AccelerometerProvider` | `AccelerometerEvent` | x, y, z (G's) | Yes | Yes |
 | `GyroscopeProvider` | `GyroscopeEvent` | x, y, z (rad/s) | Yes | Yes |
 | `MagnetometerProvider` | `MagnetometerEvent` | x, y, z (microteslas) | Yes | Yes |
 | `BarometerProvider` | `BarometerEvent` | pressure (kPa), relativeAltitude (m) | Yes | Yes |
 
-All sensor providers share the same interface:
+Sensor providers share the same interface:
 
 | Method / Property | Description |
 |---|---|
