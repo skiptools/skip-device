@@ -223,8 +223,9 @@ public struct LocationEvent: Hashable, Sendable {
         self.longitude = location.getLongitude()
         // some accessors may fail with precondition exceptions like `java.lang.IllegalStateException: The Mean Sea Level altitude of this location is not set.`, so we defensively check whether the property is set and fallback to empty values
         self.horizontalAccuracy = location.hasAccuracy() ? location.getAccuracy().toDouble() : 0.0
-        // `hasMslAltitude()`/`getMslAltitudeMeters()` were added in API 33 (Android 13); calling them on older devices throws NoSuchMethodError
-        if android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU, location.hasMslAltitude() {
+        // https://developer.android.com/reference/android/location/Location#getMslAltitudeMeters()
+        // `hasMslAltitude()`/`getMslAltitudeMeters()` were added in API 34 (Android 14); calling them on older devices throws NoSuchMethodError
+        if android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE, location.hasMslAltitude() {
             self.altitude = location.getMslAltitudeMeters()
         } else {
             self.altitude = 0.0
