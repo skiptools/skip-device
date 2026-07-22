@@ -3,8 +3,8 @@ skip:
   bridging: true
 
 # Kotlin dependencies and Gradle build options for this module can be configured here
-#build:
-#  contents:
-#    - block: 'dependencies'
-#      contents:
-#        - 'implementation("…")'
+build:
+  contents:
+    - block: 'dependencies'
+      contents:
+        - 'implementation("androidx.core:core:1.13.1")'
