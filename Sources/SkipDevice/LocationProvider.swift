@@ -272,13 +272,33 @@ public struct LocationEvent: Hashable, Sendable {
     public var latitude: Double
     public var longitude: Double
     public var horizontalAccuracy: Double
+    /// `true` if the underlying fix actually carried a horizontal accuracy.
+    ///
+    /// See ``hasSpeed`` for why this matters: `horizontalAccuracy` is `0.0` when absent on
+    /// Android and negative when absent on Darwin, and `0.0` is otherwise the *best*
+    /// possible reading.
+    public var hasHorizontalAccuracy: Bool
 
     public var altitude: Double
     public var ellipsoidalAltitude: Double
     public var verticalAccuracy: Double
 
     public var speed: Double
+    /// `true` if the underlying fix actually carried a speed.
+    ///
+    /// Absent values are flattened to `0.0`, which is indistinguishable from a genuinely
+    /// stationary device — so any speed-based logic needs this flag to tell "not moving"
+    /// from "this fix has no speed in it". The distinction is not academic: on Android a
+    /// fix resolved from wifi/cell rather than GNSS routinely reports
+    /// `Location.hasSpeed() == false`, so a `QUALITY_BALANCED_POWER_ACCURACY` stream can
+    /// report `speed == 0.0` continuously while the device is moving at road speed.
+    ///
+    /// This also normalises a real cross-platform difference: Android signals "absent" with
+    /// `hasSpeed() == false` while CoreLocation signals it with a negative `speed`.
+    public var hasSpeed: Bool
     public var speedAccuracy: Double
+    /// `true` if the underlying fix actually carried a speed accuracy. See ``hasSpeed``.
+    public var hasSpeedAccuracy: Bool
 
     public var course: Double
     public var courseAccuracy: Double
@@ -292,6 +312,7 @@ public struct LocationEvent: Hashable, Sendable {
         self.longitude = location.getLongitude()
         // some accessors may fail with precondition exceptions like `java.lang.IllegalStateException: The Mean Sea Level altitude of this location is not set.`, so we defensively check whether the property is set and fallback to empty values
         self.horizontalAccuracy = location.hasAccuracy() ? location.getAccuracy().toDouble() : 0.0
+        self.hasHorizontalAccuracy = location.hasAccuracy()
         // https://developer.android.com/reference/android/location/Location#getMslAltitudeMeters()
         // `hasMslAltitude()`/`getMslAltitudeMeters()` were added in API 34 (Android 14); calling them on older devices throws NoSuchMethodError
         if android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE, location.hasMslAltitude() {
@@ -302,7 +323,9 @@ public struct LocationEvent: Hashable, Sendable {
         self.ellipsoidalAltitude = location.hasAltitude() ? location.getAltitude() : 0.0
         self.verticalAccuracy = location.hasVerticalAccuracy() ? location.getVerticalAccuracyMeters().toDouble() : 0.0
         self.speed = location.hasSpeed() ? location.getSpeed().toDouble() : 0.0
+        self.hasSpeed = location.hasSpeed()
         self.speedAccuracy = location.hasSpeedAccuracy() ? location.getSpeedAccuracyMetersPerSecond().toDouble() : 0.0
+        self.hasSpeedAccuracy = location.hasSpeedAccuracy()
         self.course = location.hasBearing() ? location.getBearing().toDouble() : 0.0
         self.courseAccuracy = location.hasBearingAccuracy() ? location.getBearingAccuracyDegrees().toDouble() : 0.0
         self.timestamp = location.getTime().toDouble() / 1_000.0
@@ -313,11 +336,16 @@ public struct LocationEvent: Hashable, Sendable {
         self.latitude = location.coordinate.latitude
         self.longitude = location.coordinate.longitude
         self.horizontalAccuracy = location.horizontalAccuracy
+        // CoreLocation signals an absent reading with a negative value, where Android
+        // signals it with `hasAccuracy()`/`hasSpeed()`/`hasSpeedAccuracy()` returning false.
+        self.hasHorizontalAccuracy = location.horizontalAccuracy >= 0
         self.altitude = location.altitude
         self.ellipsoidalAltitude = location.ellipsoidalAltitude
         self.verticalAccuracy = location.verticalAccuracy
         self.speed = location.speed
+        self.hasSpeed = location.speed >= 0
         self.speedAccuracy = location.speedAccuracy
+        self.hasSpeedAccuracy = location.speedAccuracy >= 0
         self.course = location.course
         self.courseAccuracy = location.courseAccuracy
         self.timestamp = location.timestamp.timeIntervalSince1970
