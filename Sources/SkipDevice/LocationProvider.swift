@@ -8,7 +8,6 @@ import OSLog
 #if !SKIP
 import CoreLocation
 #else
-import android.os.Looper
 import android.content.Context
 import android.location.LocationManager
 import android.location.LocationRequest
@@ -119,6 +118,26 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         #endif
     }
 
+    #if SKIP
+    /// The `LocationRequest` shared by ``monitor(quality:interval:minimumInterval:)`` and
+    /// ``fetchCurrentLocation(quality:)``, so both paths honour `quality` identically.
+    ///
+    /// `LocationRequest.Builder`, `setQuality`, `setMinUpdateIntervalMillis` and
+    /// `LocationManager.FUSED_PROVIDER` are all API 31, which is the floor this file already
+    /// assumed before any of these parameters existed.
+    /// https://developer.android.com/reference/android/location/LocationRequest.Builder
+    private static func locationRequest(quality: LocationQuality, interval: TimeInterval, minimumInterval: TimeInterval) -> LocationRequest {
+        let builder = LocationRequest.Builder(Int64(interval * 1_000.0))
+        if let androidQuality = quality.androidQuality {
+            builder.setQuality(androidQuality)
+        }
+        if minimumInterval > 0.0 {
+            builder.setMinUpdateIntervalMillis(Int64(minimumInterval * 1_000.0))
+        }
+        return builder.build()
+    }
+    #endif
+
     /// Begins monitoring the device location, yielding a ``LocationEvent`` per fix.
     ///
     /// - Parameters:
@@ -142,16 +161,7 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             logger.info("location update: \(location.latitude) \(location.longitude)")
             continuation.yield(with: .success(location))
         })
-        let intervalMillis = Int64(interval * 1_000.0)
-        // https://developer.android.com/reference/android/location/LocationRequest.Builder
-        let builder = LocationRequest.Builder(intervalMillis)
-        if let androidQuality = quality.androidQuality {
-            builder.setQuality(androidQuality)
-        }
-        if minimumInterval > 0.0 {
-            builder.setMinUpdateIntervalMillis(Int64(minimumInterval * 1_000.0))
-        }
-        let request = builder.build()
+        let request = Self.locationRequest(quality: quality, interval: interval, minimumInterval: minimumInterval)
         do {
             locationManager.requestLocationUpdates(LocationManager.FUSED_PROVIDER, request, ProcessInfo.processInfo.androidContext.mainExecutor, listener!)
         } catch {
@@ -182,15 +192,23 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         return stream
     }
 
-    /// Issues a single-shot request for the current location
-    public func fetchCurrentLocation() async throws -> LocationEvent {
-        logger.info("fetchCurrentLocation")
+    /// Issues a single-shot request for the current location.
+    ///
+    /// With ``LocationQuality/platformDefault`` this returns the newest last-known location when the
+    /// platform has one, and only asks for a fresh fix when it has none. Any other `quality` always
+    /// asks for a fresh fix: a last-known location can be minutes old and resolved from wifi or cell,
+    /// which is not what a caller asking for a particular quality wants.
+    ///
+    /// - Parameter quality: the accuracy/power trade-off to request, as for ``monitor(quality:interval:minimumInterval:)``.
+    ///   Defaults to ``LocationQuality/platformDefault``, which leaves each platform's own default in place.
+    public func fetchCurrentLocation(quality: LocationQuality = .platformDefault) async throws -> LocationEvent {
+        logger.info("fetchCurrentLocation quality=\(quality.rawValue)")
         #if !SKIP
         @MainActor
         func requestCurrentLocation() async throws -> LocationEvent {
             let manager = configuredLocationManager()
 
-            if let location = manager.location {
+            if quality == .platformDefault, let location = manager.location {
                 logger.info("using last known location")
                 return LocationEvent(location: location)
             }
@@ -199,7 +217,7 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             return try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
                     pendingFetchContinuations[requestID] = continuation
-                    manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+                    manager.desiredAccuracy = quality.desiredAccuracy ?? kCLLocationAccuracyNearestTenMeters
 
                     if !isFetchingCurrentLocation {
                         isFetchingCurrentLocation = true
@@ -223,27 +241,36 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             android.location.LocationManager.NETWORK_PROVIDER,
         ]
 
-        var newestCachedLocation: android.location.Location?
-        for provider in providers {
-            guard let location = locationManager.getLastKnownLocation(provider) else {
-                continue
-            }
+        if quality == .platformDefault {
+            var newestCachedLocation: android.location.Location?
+            for provider in providers {
+                guard let location = locationManager.getLastKnownLocation(provider) else {
+                    continue
+                }
 
-            if let newest = newestCachedLocation {
-                if location.getElapsedRealtimeNanos() > newest.getElapsedRealtimeNanos() {
+                if let newest = newestCachedLocation {
+                    if location.getElapsedRealtimeNanos() > newest.getElapsedRealtimeNanos() {
+                        newestCachedLocation = location
+                    }
+                } else {
                     newestCachedLocation = location
                 }
-            } else {
-                newestCachedLocation = location
             }
-        }
 
-        if let newestCachedLocation {
-            logger.info("using newest last known location")
-            return LocationEvent(location: newestCachedLocation)
+            if let newestCachedLocation {
+                logger.info("using newest last known location")
+                return LocationEvent(location: newestCachedLocation)
+            }
         }
 
         let locationListener = LocListener()
+        // Single-shot via `requestLocationUpdates` + a listener that removes itself on the
+        // first fix, rather than `requestSingleUpdate`. The latter is deprecated (API 30) and
+        // takes no `LocationRequest` at all, so there is nowhere to put `quality` — this is
+        // the same call shape `monitor()` uses, which is what buys the quality control.
+        // The interval is 0 (as fast as the platform will supply one); we stop after the
+        // first fix regardless, so it only governs how quickly that first fix arrives.
+        let request = Self.locationRequest(quality: quality, interval: 0.0, minimumInterval: 0.0)
         let location = suspendCancellableCoroutine { continuation in
             locationListener.callback = {
                 locationManager.removeUpdates(locationListener)
@@ -255,8 +282,8 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
                 continuation.cancel()
             }
 
-            logger.info("locationManager.requestSingleUpdate")
-            locationManager.requestSingleUpdate(android.location.LocationManager.FUSED_PROVIDER, locationListener, Looper.getMainLooper())
+            logger.info("locationManager.requestLocationUpdates (single-shot)")
+            locationManager.requestLocationUpdates(android.location.LocationManager.FUSED_PROVIDER, request, context.mainExecutor, locationListener)
         }
         let _ = locationListener // need to hold the reference so it doesn't get gc'd
         return location
