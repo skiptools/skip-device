@@ -206,7 +206,7 @@ struct LocationView: View {
 
 ### Location Permissions
 
-Location requires both a metadata declaration and a runtime permission request on both platforms. Use [SkipKit](https://source.skip.tools/skip-kit)'s `PermissionManager` for cross-platform runtime permission handling.
+Location requires both a metadata declaration and a runtime permission request on both platforms. Use [SkipKit](https://github.com/skiptools/skip-kit)'s `PermissionManager` for cross-platform runtime permission handling.
 
 | Platform | Requirement |
 |---|---|
