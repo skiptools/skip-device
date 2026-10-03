@@ -32,16 +32,13 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
     private let locationManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var listener: LocListener?
     #else
-    private let locationManager = CLLocationManager()
+    private lazy var locationManager = CLLocationManager()
     private var callback: ((Result<LocationEvent, Error>) -> Void)?
     #endif
 
     // SKIP @nooverride
     public override init() {
         super.init()
-        #if !SKIP
-        locationManager.delegate = self
-        #endif
     }
 
     deinit {
@@ -87,6 +84,7 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             continuation.yield(with: .failure(error))
         }
         #else
+        locationManager.delegate = self
         self.callback = { result in
             switch result {
             case .success(let location):
@@ -112,24 +110,45 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
     public func fetchCurrentLocation() async throws -> LocationEvent {
         logger.info("fetchCurrentLocation")
         #if !SKIP
-        return try await withCheckedThrowingContinuation { continuation in
-            self.callback = { result in
-                switch result {
-                case .success(let location):
-                    continuation.resume(returning: location)
-                    self.locationManager.stopUpdatingLocation()
-                    self.callback = nil
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                    self.locationManager.stopUpdatingLocation()
-                    self.callback = nil
-                }
+        @MainActor
+        func requestCurrentLocation() async throws -> LocationEvent {
+            guard CLLocationManager.locationServicesEnabled() else {
+                throw LocationError(errorDescription: "Location services are disabled")
             }
-            locationManager.startUpdatingLocation()
+
+            return try await withCheckedThrowingContinuation { continuation in
+                locationManager.delegate = self
+                locationManager.desiredAccuracy = kCLLocationAccuracyBest
+                callback = { result in
+                    self.locationManager.stopUpdatingLocation()
+                    self.callback = nil
+
+                    switch result {
+                    case .success(let location):
+                        continuation.resume(returning: location)
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+                locationManager.requestLocation()
+            }
         }
+
+        return try await requestCurrentLocation()
         #else
         let context = ProcessInfo.processInfo.androidContext
         let locationManager = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        for provider in [
+            android.location.LocationManager.FUSED_PROVIDER,
+            android.location.LocationManager.GPS_PROVIDER,
+            android.location.LocationManager.NETWORK_PROVIDER,
+        ] {
+            if let location = locationManager.getLastKnownLocation(provider) {
+                logger.info("using last known location from \(provider)")
+                return LocationEvent(location: location)
+            }
+        }
+
         let locationListener = LocListener()
         let location = suspendCancellableCoroutine { continuation in
             locationListener.callback = {
