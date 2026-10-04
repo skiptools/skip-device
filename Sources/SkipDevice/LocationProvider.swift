@@ -32,8 +32,10 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
     private let locationManager = ProcessInfo.processInfo.androidContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var listener: LocListener?
     #else
-    private lazy var locationManager = CLLocationManager()
-    private var callback: ((Result<LocationEvent, Error>) -> Void)?
+    private var locationManager: CLLocationManager?
+    private var monitorContinuation: AsyncThrowingStream<LocationEvent, Error>.Continuation?
+    private var pendingFetchContinuations: [UUID: CheckedContinuation<LocationEvent, Error>] = [:]
+    private var isFetchingCurrentLocation = false
     #endif
 
     // SKIP @nooverride
@@ -42,7 +44,12 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
     }
 
     deinit {
+        #if SKIP
         stop()
+        #else
+        locationManager?.delegate = nil
+        locationManager?.stopUpdatingLocation()
+        #endif
     }
 
     /// Returns `true` if the location is available on this device
@@ -61,7 +68,9 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             listener = nil
         }
         #else
-        locationManager.stopUpdatingLocation()
+        Task { @MainActor [weak self] in
+            self?.stopMonitoring()
+        }
         #endif
     }
 
@@ -84,18 +93,16 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             continuation.yield(with: .failure(error))
         }
         #else
-        locationManager.delegate = self
-        self.callback = { result in
-            switch result {
-            case .success(let location):
-                logger.info("location update: \(location.latitude) \(location.longitude)")
-                continuation.yield(with: .success(location))
-            case .failure(let error):
-                continuation.yield(with: .failure(error))
-                self.callback = nil
+        Task { @MainActor [weak self] in
+            guard let self else {
+                continuation.finish()
+                return
             }
+
+            let manager = self.configuredLocationManager()
+            self.monitorContinuation = continuation
+            manager.startUpdatingLocation()
         }
-        locationManager.startUpdatingLocation()
         #endif
 
         continuation.onTermination = { [weak self] _ in
@@ -116,21 +123,27 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
                 throw LocationError(errorDescription: "Location services are disabled")
             }
 
-            return try await withCheckedThrowingContinuation { continuation in
-                locationManager.delegate = self
-                locationManager.desiredAccuracy = kCLLocationAccuracyBest
-                callback = { result in
-                    self.locationManager.stopUpdatingLocation()
-                    self.callback = nil
+            let manager = configuredLocationManager()
+            if let location = manager.location {
+                logger.info("using last known location")
+                return LocationEvent(location: location)
+            }
 
-                    switch result {
-                    case .success(let location):
-                        continuation.resume(returning: location)
-                    case .failure(let error):
-                        continuation.resume(throwing: error)
+            let requestID = UUID()
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    pendingFetchContinuations[requestID] = continuation
+                    manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+
+                    if !isFetchingCurrentLocation {
+                        isFetchingCurrentLocation = true
+                        manager.requestLocation()
                     }
                 }
-                locationManager.requestLocation()
+            } onCancel: { [weak self] in
+                Task { @MainActor in
+                    self?.cancelPendingFetch(id: requestID)
+                }
             }
         }
 
@@ -138,15 +151,30 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         #else
         let context = ProcessInfo.processInfo.androidContext
         let locationManager = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
-        for provider in [
+        let providers = [
             android.location.LocationManager.FUSED_PROVIDER,
             android.location.LocationManager.GPS_PROVIDER,
             android.location.LocationManager.NETWORK_PROVIDER,
-        ] {
-            if let location = locationManager.getLastKnownLocation(provider) {
-                logger.info("using last known location from \(provider)")
-                return LocationEvent(location: location)
+        ]
+
+        var newestCachedLocation: android.location.Location?
+        for provider in providers {
+            guard let location = locationManager.getLastKnownLocation(provider) else {
+                continue
             }
+
+            if let newest = newestCachedLocation {
+                if location.getElapsedRealtimeNanos() > newest.getElapsedRealtimeNanos() {
+                    newestCachedLocation = location
+                }
+            } else {
+                newestCachedLocation = location
+            }
+        }
+
+        if let newestCachedLocation {
+            logger.info("using newest last known location")
+            return LocationEvent(location: newestCachedLocation)
         }
 
         let locationListener = LocListener()
@@ -168,6 +196,60 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         return location
         #endif
     }
+
+    #if !SKIP
+    @MainActor
+    private func configuredLocationManager() -> CLLocationManager {
+        if let locationManager {
+            locationManager.delegate = self
+            return locationManager
+        }
+
+        let locationManager = CLLocationManager()
+        locationManager.delegate = self
+        self.locationManager = locationManager
+        return locationManager
+    }
+
+    @MainActor
+    private func stopMonitoring() {
+        locationManager?.stopUpdatingLocation()
+        monitorContinuation = nil
+    }
+
+    @MainActor
+    private func cancelPendingFetch(id: UUID) {
+        guard let continuation = pendingFetchContinuations.removeValue(forKey: id) else {
+            return
+        }
+
+        continuation.resume(throwing: CancellationError())
+        if pendingFetchContinuations.isEmpty {
+            isFetchingCurrentLocation = false
+        }
+    }
+
+    @MainActor
+    private func completePendingFetches(with result: Result<LocationEvent, Error>) {
+        guard !pendingFetchContinuations.isEmpty else {
+            isFetchingCurrentLocation = false
+            return
+        }
+
+        let continuations = pendingFetchContinuations.values
+        pendingFetchContinuations.removeAll()
+        isFetchingCurrentLocation = false
+
+        for continuation in continuations {
+            switch result {
+            case .success(let location):
+                continuation.resume(returning: location)
+            case .failure(let error):
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+    #endif
 }
 
 #if SKIP
@@ -191,20 +273,35 @@ class LocListener : LocationListener {
 #else
 extension LocationProvider: CLLocationManagerDelegate {
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        logger.info("LocationProvider.didUpdateLocations: \(locations)")
-        for location in locations {
-            callback?(.success(LocationEvent(location: location)))
+        MainActor.assumeIsolated {
+            logger.info("LocationProvider.didUpdateLocations: \(locations)")
+
+            for location in locations {
+                monitorContinuation?.yield(with: .success(LocationEvent(location: location)))
+            }
+
+            if let location = locations.last {
+                completePendingFetches(with: .success(LocationEvent(location: location)))
+            }
         }
     }
 
     public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        logger.error("LocationProvider.didFailWithError: \(error)")
-        callback?(.failure(error))
+        MainActor.assumeIsolated {
+            logger.error("LocationProvider.didFailWithError: \(error)")
+            monitorContinuation?.yield(with: .failure(error))
+            monitorContinuation = nil
+            completePendingFetches(with: .failure(error))
+        }
     }
 
     public func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: any Error) {
-        logger.error("LocationProvider.monitoringDidFailFor: \(error)")
-        callback?(.failure(error))
+        MainActor.assumeIsolated {
+            logger.error("LocationProvider.monitoringDidFailFor: \(error)")
+            monitorContinuation?.yield(with: .failure(error))
+            monitorContinuation = nil
+            completePendingFetches(with: .failure(error))
+        }
     }
 
     public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
