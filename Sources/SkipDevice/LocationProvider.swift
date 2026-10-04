@@ -295,6 +295,7 @@ extension LocationProvider: CLLocationManagerDelegate {
         }
     }
 
+    #if !os(watchOS)
     public func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: any Error) {
         MainActor.assumeIsolated {
             logger.error("LocationProvider.monitoringDidFailFor: \(error)")
@@ -303,6 +304,7 @@ extension LocationProvider: CLLocationManagerDelegate {
             completePendingFetches(with: .failure(error))
         }
     }
+    #endif
 
     public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         logger.info("LocationProvider.locationManagerDidChangeAuthorization: \(manager.authorizationStatus.rawValue)")

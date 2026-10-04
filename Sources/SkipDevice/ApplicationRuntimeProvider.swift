@@ -6,7 +6,7 @@ import Foundation
 import OSLog
 #endif
 #if !SKIP
-#if canImport(UIKit)
+#if canImport(UIKit) && !os(watchOS)
 import UIKit
 #endif
 #else
@@ -203,7 +203,7 @@ public final class ApplicationRuntimeProvider: @unchecked Sendable {
         guard notificationObservers.isEmpty else {
             return
         }
-        #if canImport(UIKit)
+        #if canImport(UIKit) && !os(watchOS)
         let center = NotificationCenter.default
         notificationObservers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { [weak self] _ in
             self?.publishLifecycle(ApplicationLifecycleEventKind.didBecomeActive)
@@ -226,7 +226,7 @@ public final class ApplicationRuntimeProvider: @unchecked Sendable {
 
     #if !SKIP
     private static func initialLifecyclePhase() -> ApplicationLifecyclePhase {
-        #if canImport(UIKit)
+        #if canImport(UIKit) && !os(watchOS)
         guard Thread.isMainThread else {
             return ApplicationLifecyclePhase.unknown
         }

@@ -6,7 +6,7 @@ import Foundation
 import OSLog
 #endif
 #if !SKIP
-#if canImport(UIKit)
+#if canImport(UIKit) && !os(watchOS)
 import UIKit
 #endif
 #else
@@ -35,7 +35,7 @@ public final class BackgroundActivity {
     public static func begin(_ request: BackgroundActivityRequest) async throws -> String {
         #if SKIP
         return try BackgroundActivityAndroidHost.begin(request)
-        #elseif canImport(UIKit)
+        #elseif canImport(UIKit) && !os(watchOS)
         return try await MainActor.run {
             let identifier = UUID().uuidString
             let task = UIApplication.shared.beginBackgroundTask(withName: request.name) {
@@ -58,7 +58,7 @@ public final class BackgroundActivity {
     public static func end(_ identifier: String) async {
         #if SKIP
         BackgroundActivityAndroidHost.end(identifier)
-        #elseif canImport(UIKit)
+        #elseif canImport(UIKit) && !os(watchOS)
         await MainActor.run {
             BackgroundActivityDarwinRegistry.shared.end(identifier)
         }
@@ -136,7 +136,7 @@ public struct BackgroundActivityError: LocalizedError {
     }
 }
 
-#if !SKIP && canImport(UIKit)
+#if !SKIP && canImport(UIKit) && !os(watchOS)
 @MainActor
 private final class BackgroundActivityDarwinRegistry: @unchecked Sendable {
     static let shared = BackgroundActivityDarwinRegistry()

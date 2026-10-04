@@ -6,7 +6,11 @@ import Foundation
 import OSLog
 #endif
 #if !SKIP
+#if os(watchOS)
+import Network
+#else
 import SystemConfiguration
+#endif
 #else
 import android.content.Context
 import android.net.ConnectivityManager
@@ -22,7 +26,9 @@ public class NetworkReachability {
     /// Returns true if the network is currently reachable
     public static var isNetworkReachable: Bool {
         logger.debug("isNetworkReachable")
-        #if !SKIP
+        #if os(watchOS)
+        return WatchNetworkStatus.shared.isReachable
+        #elseif !SKIP
         var zeroAddress = sockaddr_in()
         zeroAddress.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         zeroAddress.sin_family = sa_family_t(AF_INET)
@@ -67,3 +73,32 @@ public class NetworkReachability {
 }
 #endif
 
+
+#if os(watchOS) && !SKIP_BRIDGE
+private final class WatchNetworkStatus: @unchecked Sendable {
+    static let shared = WatchNetworkStatus()
+
+    private let monitor = NWPathMonitor()
+    private let lock = NSLock()
+
+    // Let network requests proceed until the first path update arrives.
+    private var reachable = true
+
+    var isReachable: Bool {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        return self.reachable
+    }
+
+    private init() {
+        self.monitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            self.lock.lock()
+            self.reachable = path.status == .satisfied
+            self.lock.unlock()
+        }
+
+        self.monitor.start(queue: DispatchQueue(label: "skip.device.watch-network"))
+    }
+}
+#endif
