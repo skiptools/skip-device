@@ -3,7 +3,7 @@
 #if !SKIP_BRIDGE
 import Foundation
 #if !SKIP
-#if canImport(UIKit)
+#if canImport(UIKit) && !os(watchOS)
 import UIKit
 #endif
 #else
@@ -76,7 +76,7 @@ public struct DeviceIdentity: Hashable, Sendable {
             device: Build.DEVICE,
             product: Build.PRODUCT
         )
-        #elseif canImport(UIKit)
+        #elseif canImport(UIKit) && !os(watchOS)
         guard Thread.isMainThread else {
             return appleFallbackIdentity()
         }
@@ -93,6 +93,15 @@ public struct DeviceIdentity: Hashable, Sendable {
                 brand: "Apple"
             )
         }
+        #elseif os(watchOS)
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return DeviceIdentity(
+            model: "Apple Watch",
+            systemName: "watchOS",
+            systemVersion: "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)",
+            manufacturer: "Apple",
+            brand: "Apple"
+        )
         #else
         return DeviceIdentity(
             name: Host.current().localizedName,
@@ -111,7 +120,7 @@ public struct DeviceIdentity: Hashable, Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    #if !SKIP && canImport(UIKit)
+    #if !SKIP && canImport(UIKit) && !os(watchOS)
     private static func appleFallbackIdentity() -> DeviceIdentity {
         let version = ProcessInfo.processInfo.operatingSystemVersion
         return DeviceIdentity(
@@ -139,7 +148,7 @@ public struct DeviceIdentity: Hashable, Sendable {
     }
     #endif
 
-    #if !SKIP && !canImport(UIKit)
+    #if !SKIP && !canImport(UIKit) && !os(watchOS)
     private static func machineIdentifier() -> String? {
         var systemInfo = utsname()
         uname(&systemInfo)
