@@ -120,11 +120,6 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         @MainActor
         func requestCurrentLocation() async throws -> LocationEvent {
             let manager = configuredLocationManager()
-            let authorizationStatus = manager.authorizationStatus
-            guard authorizationStatus == .authorizedAlways || authorizationStatus == .authorizedWhenInUse
-            else {
-                throw LocationError(errorDescription: "Location access is not authorized")
-            }
 
             if let location = manager.location {
                 logger.info("using last known location")
