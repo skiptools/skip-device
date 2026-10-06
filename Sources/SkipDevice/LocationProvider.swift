@@ -119,11 +119,8 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         #if !SKIP
         @MainActor
         func requestCurrentLocation() async throws -> LocationEvent {
-            guard CLLocationManager.locationServicesEnabled() else {
-                throw LocationError(errorDescription: "Location services are disabled")
-            }
-
             let manager = configuredLocationManager()
+
             if let location = manager.location {
                 logger.info("using last known location")
                 return LocationEvent(location: location)
