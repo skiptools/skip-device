@@ -8,7 +8,6 @@ import OSLog
 #if !SKIP
 import CoreLocation
 #else
-import android.os.Looper
 import android.content.Context
 import android.location.LocationManager
 import android.location.LocationRequest
@@ -22,6 +21,51 @@ typealias NSObject = AnyObject
 #endif
 
 private let logger: Logger = Logger(subsystem: "skip.device", category: "LocationProvider") // adb logcat '*:S' 'skip.device.LocationProvider:V'
+
+/// The desired quality of location updates, trading power consumption against accuracy.
+///
+/// Maps onto [`LocationRequest.QUALITY_*`](https://developer.android.com/reference/android/location/LocationRequest)
+/// on Android and `CLLocationManager.desiredAccuracy` on Darwin. The two platforms have
+/// different out-of-the-box defaults — Android's `LocationRequest` defaults to
+/// `QUALITY_BALANCED_POWER_ACCURACY` while `CLLocationManager` defaults to
+/// `kCLLocationAccuracyBest` — so `platformDefault` leaves each side untouched rather
+/// than trying to unify them.
+public enum LocationQuality: Int, Hashable, Sendable {
+    /// Leave the platform's own default in place (the behaviour before this parameter existed).
+    case platformDefault = 0
+    /// Prefer power savings over accuracy; fixes are typically resolved from cell/wifi.
+    case lowPower = 1
+    /// Balance power against accuracy.
+    case balanced = 2
+    /// Prefer accuracy over power, requesting GNSS where it is available.
+    case highAccuracy = 3
+    /// The highest available accuracy, tuned for turn-by-turn navigation.
+    case navigation = 4
+
+    #if SKIP
+    /// The `LocationRequest.QUALITY_*` constant to request, or `nil` to leave the builder's default.
+    var androidQuality: Int? {
+        switch self {
+        case .platformDefault: return nil
+        case .lowPower: return LocationRequest.QUALITY_LOW_POWER
+        case .balanced: return LocationRequest.QUALITY_BALANCED_POWER_ACCURACY
+        // Android has no separate navigation tier; `QUALITY_HIGH_ACCURACY` is the top of the scale.
+        case .highAccuracy, .navigation: return LocationRequest.QUALITY_HIGH_ACCURACY
+        }
+    }
+    #else
+    /// The `CLLocationManager.desiredAccuracy` to set, or `nil` to leave CoreLocation's default.
+    var desiredAccuracy: CLLocationAccuracy? {
+        switch self {
+        case .platformDefault: return nil
+        case .lowPower: return kCLLocationAccuracyHundredMeters
+        case .balanced: return kCLLocationAccuracyNearestTenMeters
+        case .highAccuracy: return kCLLocationAccuracyBest
+        case .navigation: return kCLLocationAccuracyBestForNavigation
+        }
+    }
+    #endif
+}
 
 /// A current location fetcher.
 ///
@@ -74,8 +118,42 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         #endif
     }
 
-    public func monitor() -> AsyncThrowingStream<LocationEvent, Error> {
-        logger.debug("starting location monitor")
+    #if SKIP
+    /// The `LocationRequest` shared by ``monitor(quality:interval:minimumInterval:)`` and
+    /// ``fetchCurrentLocation(quality:)``, so both paths honour `quality` identically.
+    ///
+    /// `LocationRequest.Builder`, `setQuality`, `setMinUpdateIntervalMillis` and
+    /// `LocationManager.FUSED_PROVIDER` are all API 31, which is the floor this file already
+    /// assumed before any of these parameters existed.
+    /// https://developer.android.com/reference/android/location/LocationRequest.Builder
+    private static func locationRequest(quality: LocationQuality, interval: TimeInterval, minimumInterval: TimeInterval) -> LocationRequest {
+        let builder = LocationRequest.Builder(Int64(interval * 1_000.0))
+        if let androidQuality = quality.androidQuality {
+            builder.setQuality(androidQuality)
+        }
+        if minimumInterval > 0.0 {
+            builder.setMinUpdateIntervalMillis(Int64(minimumInterval * 1_000.0))
+        }
+        return builder.build()
+    }
+    #endif
+
+    /// Begins monitoring the device location, yielding a ``LocationEvent`` per fix.
+    ///
+    /// - Parameters:
+    ///   - quality: the accuracy/power trade-off to request. Defaults to
+    ///     ``LocationQuality/platformDefault``, which leaves each platform's own default in place.
+    ///   - interval: the *desired* interval between fixes, defaulting to one second. This is a
+    ///     request, not a guarantee — the platform may deliver less often, and at
+    ///     ``LocationQuality/balanced`` it demonstrably does. `quality` is the lever that
+    ///     changes that; `interval` alone will not.
+    ///   - minimumInterval: the fastest rate at which the caller can accept fixes — Android will
+    ///     not deliver two updates closer together than this. Note this bounds delivery from the
+    ///     *fast* side only: it is a rate limiter, and does not stop the platform delivering more
+    ///     slowly than `interval`. Pass `0` (the default) to leave the platform's own default (a
+    ///     sixth of `interval`) in place. Ignored on Darwin, which has no equivalent knob.
+    public func monitor(quality: LocationQuality = .platformDefault, interval: TimeInterval = 1.0, minimumInterval: TimeInterval = 0.0) -> AsyncThrowingStream<LocationEvent, Error> {
+        logger.debug("starting location monitor quality=\(quality.rawValue) interval=\(interval) minimumInterval=\(minimumInterval)")
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: LocationEvent.self)
 
         #if SKIP
@@ -83,9 +161,7 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             logger.info("location update: \(location.latitude) \(location.longitude)")
             continuation.yield(with: .success(location))
         })
-        let intervalMillis = Int64(1_000)
-        // https://developer.android.com/reference/android/location/LocationRequest.Builder
-        let request = LocationRequest.Builder(intervalMillis).build() // TODO: setQuality, etc.
+        let request = Self.locationRequest(quality: quality, interval: interval, minimumInterval: minimumInterval)
         do {
             locationManager.requestLocationUpdates(LocationManager.FUSED_PROVIDER, request, ProcessInfo.processInfo.androidContext.mainExecutor, listener!)
         } catch {
@@ -100,6 +176,9 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             }
 
             let manager = self.configuredLocationManager()
+            if let desiredAccuracy = quality.desiredAccuracy {
+                manager.desiredAccuracy = desiredAccuracy
+            }
             self.monitorContinuation = continuation
             manager.startUpdatingLocation()
         }
@@ -113,15 +192,23 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         return stream
     }
 
-    /// Issues a single-shot request for the current location
-    public func fetchCurrentLocation() async throws -> LocationEvent {
-        logger.info("fetchCurrentLocation")
+    /// Issues a single-shot request for the current location.
+    ///
+    /// With ``LocationQuality/platformDefault`` this returns the newest last-known location when the
+    /// platform has one, and only asks for a fresh fix when it has none. Any other `quality` always
+    /// asks for a fresh fix: a last-known location can be minutes old and resolved from wifi or cell,
+    /// which is not what a caller asking for a particular quality wants.
+    ///
+    /// - Parameter quality: the accuracy/power trade-off to request, as for ``monitor(quality:interval:minimumInterval:)``.
+    ///   Defaults to ``LocationQuality/platformDefault``, which leaves each platform's own default in place.
+    public func fetchCurrentLocation(quality: LocationQuality = .platformDefault) async throws -> LocationEvent {
+        logger.info("fetchCurrentLocation quality=\(quality.rawValue)")
         #if !SKIP
         @MainActor
         func requestCurrentLocation() async throws -> LocationEvent {
             let manager = configuredLocationManager()
 
-            if let location = manager.location {
+            if quality == .platformDefault, let location = manager.location {
                 logger.info("using last known location")
                 return LocationEvent(location: location)
             }
@@ -130,7 +217,7 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             return try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
                     pendingFetchContinuations[requestID] = continuation
-                    manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+                    manager.desiredAccuracy = quality.desiredAccuracy ?? kCLLocationAccuracyNearestTenMeters
 
                     if !isFetchingCurrentLocation {
                         isFetchingCurrentLocation = true
@@ -154,27 +241,36 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             android.location.LocationManager.NETWORK_PROVIDER,
         ]
 
-        var newestCachedLocation: android.location.Location?
-        for provider in providers {
-            guard let location = locationManager.getLastKnownLocation(provider) else {
-                continue
-            }
+        if quality == .platformDefault {
+            var newestCachedLocation: android.location.Location?
+            for provider in providers {
+                guard let location = locationManager.getLastKnownLocation(provider) else {
+                    continue
+                }
 
-            if let newest = newestCachedLocation {
-                if location.getElapsedRealtimeNanos() > newest.getElapsedRealtimeNanos() {
+                if let newest = newestCachedLocation {
+                    if location.getElapsedRealtimeNanos() > newest.getElapsedRealtimeNanos() {
+                        newestCachedLocation = location
+                    }
+                } else {
                     newestCachedLocation = location
                 }
-            } else {
-                newestCachedLocation = location
             }
-        }
 
-        if let newestCachedLocation {
-            logger.info("using newest last known location")
-            return LocationEvent(location: newestCachedLocation)
+            if let newestCachedLocation {
+                logger.info("using newest last known location")
+                return LocationEvent(location: newestCachedLocation)
+            }
         }
 
         let locationListener = LocListener()
+        // Single-shot via `requestLocationUpdates` + a listener that removes itself on the
+        // first fix, rather than `requestSingleUpdate`. The latter is deprecated (API 30) and
+        // takes no `LocationRequest` at all, so there is nowhere to put `quality` — this is
+        // the same call shape `monitor()` uses, which is what buys the quality control.
+        // The interval is 0 (as fast as the platform will supply one); we stop after the
+        // first fix regardless, so it only governs how quickly that first fix arrives.
+        let request = Self.locationRequest(quality: quality, interval: 0.0, minimumInterval: 0.0)
         let location = suspendCancellableCoroutine { continuation in
             locationListener.callback = {
                 locationManager.removeUpdates(locationListener)
@@ -186,8 +282,8 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
                 continuation.cancel()
             }
 
-            logger.info("locationManager.requestSingleUpdate")
-            locationManager.requestSingleUpdate(android.location.LocationManager.FUSED_PROVIDER, locationListener, Looper.getMainLooper())
+            logger.info("locationManager.requestLocationUpdates (single-shot)")
+            locationManager.requestLocationUpdates(android.location.LocationManager.FUSED_PROVIDER, request, context.mainExecutor, locationListener)
         }
         let _ = locationListener // need to hold the reference so it doesn't get gc'd
         return location
@@ -318,13 +414,33 @@ public struct LocationEvent: Hashable, Sendable {
     public var latitude: Double
     public var longitude: Double
     public var horizontalAccuracy: Double
+    /// `true` if the underlying fix actually carried a horizontal accuracy.
+    ///
+    /// See ``hasSpeed`` for why this matters: `horizontalAccuracy` is `0.0` when absent on
+    /// Android and negative when absent on Darwin, and `0.0` is otherwise the *best*
+    /// possible reading.
+    public var hasHorizontalAccuracy: Bool
 
     public var altitude: Double
     public var ellipsoidalAltitude: Double
     public var verticalAccuracy: Double
 
     public var speed: Double
+    /// `true` if the underlying fix actually carried a speed.
+    ///
+    /// Absent values are flattened to `0.0`, which is indistinguishable from a genuinely
+    /// stationary device — so any speed-based logic needs this flag to tell "not moving"
+    /// from "this fix has no speed in it". The distinction is not academic: on Android a
+    /// fix resolved from wifi/cell rather than GNSS routinely reports
+    /// `Location.hasSpeed() == false`, so a `QUALITY_BALANCED_POWER_ACCURACY` stream can
+    /// report `speed == 0.0` continuously while the device is moving at road speed.
+    ///
+    /// This also normalises a real cross-platform difference: Android signals "absent" with
+    /// `hasSpeed() == false` while CoreLocation signals it with a negative `speed`.
+    public var hasSpeed: Bool
     public var speedAccuracy: Double
+    /// `true` if the underlying fix actually carried a speed accuracy. See ``hasSpeed``.
+    public var hasSpeedAccuracy: Bool
 
     public var course: Double
     public var courseAccuracy: Double
@@ -338,6 +454,7 @@ public struct LocationEvent: Hashable, Sendable {
         self.longitude = location.getLongitude()
         // some accessors may fail with precondition exceptions like `java.lang.IllegalStateException: The Mean Sea Level altitude of this location is not set.`, so we defensively check whether the property is set and fallback to empty values
         self.horizontalAccuracy = location.hasAccuracy() ? location.getAccuracy().toDouble() : 0.0
+        self.hasHorizontalAccuracy = location.hasAccuracy()
         // https://developer.android.com/reference/android/location/Location#getMslAltitudeMeters()
         // `hasMslAltitude()`/`getMslAltitudeMeters()` were added in API 34 (Android 14); calling them on older devices throws NoSuchMethodError
         if android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE, location.hasMslAltitude() {
@@ -348,7 +465,9 @@ public struct LocationEvent: Hashable, Sendable {
         self.ellipsoidalAltitude = location.hasAltitude() ? location.getAltitude() : 0.0
         self.verticalAccuracy = location.hasVerticalAccuracy() ? location.getVerticalAccuracyMeters().toDouble() : 0.0
         self.speed = location.hasSpeed() ? location.getSpeed().toDouble() : 0.0
+        self.hasSpeed = location.hasSpeed()
         self.speedAccuracy = location.hasSpeedAccuracy() ? location.getSpeedAccuracyMetersPerSecond().toDouble() : 0.0
+        self.hasSpeedAccuracy = location.hasSpeedAccuracy()
         self.course = location.hasBearing() ? location.getBearing().toDouble() : 0.0
         self.courseAccuracy = location.hasBearingAccuracy() ? location.getBearingAccuracyDegrees().toDouble() : 0.0
         self.timestamp = location.getTime().toDouble() / 1_000.0
@@ -359,11 +478,16 @@ public struct LocationEvent: Hashable, Sendable {
         self.latitude = location.coordinate.latitude
         self.longitude = location.coordinate.longitude
         self.horizontalAccuracy = location.horizontalAccuracy
+        // CoreLocation signals an absent reading with a negative value, where Android
+        // signals it with `hasAccuracy()`/`hasSpeed()`/`hasSpeedAccuracy()` returning false.
+        self.hasHorizontalAccuracy = location.horizontalAccuracy >= 0
         self.altitude = location.altitude
         self.ellipsoidalAltitude = location.ellipsoidalAltitude
         self.verticalAccuracy = location.verticalAccuracy
         self.speed = location.speed
+        self.hasSpeed = location.speed >= 0
         self.speedAccuracy = location.speedAccuracy
+        self.hasSpeedAccuracy = location.speedAccuracy >= 0
         self.course = location.course
         self.courseAccuracy = location.courseAccuracy
         self.timestamp = location.timestamp.timeIntervalSince1970
