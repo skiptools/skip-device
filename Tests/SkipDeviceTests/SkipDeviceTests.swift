@@ -108,6 +108,79 @@ final class SkipDeviceTests: XCTestCase {
     }
     #endif
 
+    func testGeocodedPlaceNormalizesBlankFields() {
+        let place = GeocodedPlace(latitude: 12.9352, longitude: 77.6245, name: "  ", locality: " Bengaluru ", country: "")
+
+        XCTAssertNil(place.name)
+        XCTAssertEqual(place.locality, "Bengaluru")
+        XCTAssertNil(place.country)
+        XCTAssertNil(place.postalCode)
+    }
+
+    func testGeocodedPlaceJoinedSkipsBlankAndRepeatedParts() {
+        let parts: [String?] = ["Koramangala", nil, " ", "Koramangala", "Bengaluru"]
+        XCTAssertEqual(parts.joinedNonEmpty, "Koramangala, Bengaluru")
+        let blank: [String?] = [nil, ""]
+        XCTAssertNil(blank.joinedNonEmpty)
+    }
+
+    func testGeocodeBlankQueryReturnsNoResults() async throws {
+        let provider = GeocodingProvider()
+        let places = try await provider.geocode(address: "   ")
+        XCTAssertEqual(places.count, 0)
+        let none = try await provider.geocode(address: "Bengaluru", maxResults: 0)
+        XCTAssertEqual(none.count, 0)
+    }
+
+    #if SKIP
+    func testGeocodedPlaceFromAndroidAddress() {
+        let address = android.location.Address(java.util.Locale.US)
+        address.setLatitude(37.3349)
+        address.setLongitude(-122.009)
+        address.setFeatureName("Apple Park")
+        address.setAddressLine(0, "1 Apple Park Way")
+        address.setAddressLine(1, "Cupertino, CA 95014")
+        address.setSubLocality("")
+        address.setLocality("Cupertino")
+        address.setAdminArea("California")
+        address.setPostalCode("95014")
+        address.setCountryName("United States")
+        address.setCountryCode("US")
+
+        let place = GeocodedPlace(address: address)
+        XCTAssertEqual(place.latitude, 37.3349)
+        XCTAssertEqual(place.longitude, -122.009)
+        XCTAssertEqual(place.name, "Apple Park")
+        XCTAssertEqual(place.formattedAddress, "1 Apple Park Way, Cupertino, CA 95014")
+        XCTAssertNil(place.subLocality)
+        XCTAssertEqual(place.locality, "Cupertino")
+        XCTAssertEqual(place.administrativeArea, "California")
+        XCTAssertEqual(place.postalCode, "95014")
+        XCTAssertEqual(place.country, "United States")
+        XCTAssertEqual(place.countryCode, "US")
+    }
+    #endif
+
+    func testGeocodingProviderLiveLookup() async throws {
+        // Live geocoding needs the network and a platform geocoder, and is rate-limited,
+        // so it only runs when explicitly requested.
+        if ProcessInfo.processInfo.environment["SKIP_DEVICE_LIVE_GEOCODING"] == nil {
+            throw XCTSkip("Set SKIP_DEVICE_LIVE_GEOCODING=1 to run live geocoding lookups")
+        }
+        let provider = GeocodingProvider(locale: Locale(identifier: "en_US"))
+        if !provider.isAvailable {
+            throw XCTSkip("No geocoder available on this device")
+        }
+
+        let places = try await provider.geocode(address: "Cupertino, CA")
+        let place = try XCTUnwrap(places.first)
+        XCTAssertEqual(place.latitude, 37.32, accuracy: 0.1)
+        XCTAssertEqual(place.longitude, -122.03, accuracy: 0.1)
+
+        let reverse = try await provider.reverseGeocode(latitude: place.latitude, longitude: place.longitude)
+        XCTAssertEqual(reverse.first?.locality, "Cupertino")
+    }
+
     func testLocationProvier() async throws {
         let lp = LocationProvider()
 

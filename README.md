@@ -1,7 +1,7 @@
 # SkipDevice
 
 The SkipDevice module is a dual-platform [Skip](https://skip.dev) framework that provides access to
-network reachability, device identity, location services, app runtime events, finite background activity,
+network reachability, device identity, location services, geocoding, app runtime events, finite background activity,
 and device sensor data (accelerometer, gyroscope, magnetometer, and barometer).
 
 On Apple platforms, the module wraps platform APIs such as
@@ -225,6 +225,67 @@ Android manifest entries:
 ```xml
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+```
+
+## Geocoding
+
+Convert coordinates into place names and addresses (reverse geocoding), and place names or addresses into coordinates (forward geocoding).
+
+| | iOS | Android |
+|---|---|---|
+| API | [MKReverseGeocodingRequest](https://developer.apple.com/documentation/mapkit/mkreversegeocodingrequest) / [MKGeocodingRequest](https://developer.apple.com/documentation/mapkit/mkgeocodingrequest) on iOS 26+, [CLGeocoder](https://developer.apple.com/documentation/corelocation/clgeocoder) on earlier versions | [Geocoder](https://developer.android.com/reference/android/location/Geocoder) |
+
+### Reverse Geocoding
+
+```swift
+import SkipDevice
+
+let location = try await LocationProvider().fetchCurrentLocation()
+let places = try await GeocodingProvider().reverseGeocode(latitude: location.latitude, longitude: location.longitude)
+if let place = places.first {
+    print("\(place.subLocality ?? ""), \(place.locality ?? "")")
+}
+```
+
+### Forward Geocoding
+
+```swift
+import SkipDevice
+
+let places = try await GeocodingProvider().geocode(address: "Koramangala, Bengaluru", maxResults: 5)
+for place in places {
+    print("\(place.formattedAddress ?? ""): \(place.latitude), \(place.longitude)")
+}
+```
+
+Both methods return an empty array when nothing matches, and throw a `GeocodingError` when the lookup itself fails.
+Geocoding services are rate-limited on both platforms, so debounce lookups made while the user is typing.
+`isAvailable` is `false` on Android devices without a geocoding backend (such as devices without Google Play services).
+
+### GeocodedPlace Properties
+
+Apart from the coordinate, every property is optional. Which ones are set depends on the place and the platform:
+on iOS 26 and later, MapKit no longer provides the neighborhood, state, or postal code as separate fields.
+
+| Property | Type | Description | Android | iOS < 26 | iOS 26+ |
+|---|---|---|---|---|---|
+| `latitude` | `Double` | Latitude in degrees | ✓ | ✓ | ✓ |
+| `longitude` | `Double` | Longitude in degrees | ✓ | ✓ | ✓ |
+| `name` | `String?` | Name of the place, landmark, or street address | ✓ | ✓ | ✓ |
+| `formattedAddress` | `String?` | Full address on a single line | ✓ | ✓ | ✓ |
+| `subLocality` | `String?` | Neighborhood or district | ✓ | ✓ | – |
+| `locality` | `String?` | City | ✓ | ✓ | ✓ |
+| `administrativeArea` | `String?` | State or province | ✓ | ✓ | – |
+| `postalCode` | `String?` | Postal or ZIP code | ✓ | ✓ | – |
+| `country` | `String?` | Localized country name | ✓ | ✓ | ✓ |
+| `countryCode` | `String?` | ISO 3166-1 alpha-2 country code | ✓ | ✓ | ✓ |
+
+### Geocoding Permissions
+
+Geocoding does not require location permission. It does require network access, so Android apps must declare:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET"/>
 ```
 
 ## Application Runtime Events
@@ -578,6 +639,7 @@ Set `android:required="false"` so the app can still be installed on devices with
 | Network Reachability | None | None | `ACCESS_NETWORK_STATE` | None |
 | Device Identity | None | None | None | None |
 | Location | `NSLocationWhenInUseUsageDescription` | Yes (via `PermissionManager`) | `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` | Yes (via `PermissionManager`) |
+| Geocoding | None | None | `INTERNET` | None |
 | Application Runtime Events | None | None | None | None |
 | Background Activity | None | None | `FOREGROUND_SERVICE` plus selected foreground-service type permissions | App-owned by use case |
 | Accelerometer | `NSMotionUsageDescription` | None | None | None |
@@ -592,6 +654,7 @@ Set `android:required="false"` so the app can still be installed on devices with
 | `NetworkReachability` | -- | `.isNetworkReachable: Bool` (static) | -- | -- |
 | `DeviceIdentity` | `DeviceIdentity` | `.current`, name, model, system, vendor, Android build fields | -- | -- |
 | `LocationProvider` | `LocationEvent` | latitude, longitude, altitude, speed, course, accuracy | Yes | No (1s default) |
+| `GeocodingProvider` | `GeocodedPlace` | `reverseGeocode(latitude:longitude:)`, `geocode(address:maxResults:)` | Yes | -- |
 | `ApplicationRuntimeProvider` | `ApplicationLifecycleEvent`, `MemoryPressureEvent` | lifecycle phase/kind, memory pressure level | -- | -- |
 | `BackgroundActivity` | `BackgroundActivityRequest` | `begin(_:)`, `end(_:)`, reason, notification metadata | -- | -- |
 | `AccelerometerProvider` | `AccelerometerEvent` | x, y, z (G's) | Yes | Yes |
