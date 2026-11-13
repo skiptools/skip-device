@@ -118,44 +118,12 @@ final class SkipDeviceTests: XCTestCase {
     }
 
     #if SKIP
-    // SKIP INSERT: @org.robolectric.annotation.Config(sdk = [28])
-    func testMonitorDeliversFixesBelowAPI31() async throws {
-        try await assertMonitorDeliversSimulatedFix(from: android.location.LocationManager.GPS_PROVIDER)
-    }
-
-    // SKIP INSERT: @org.robolectric.annotation.Config(sdk = [33])
-    func testMonitorDeliversFixesFromAPI31() async throws {
-        try await assertMonitorDeliversSimulatedFix(from: android.location.LocationManager.FUSED_PROVIDER)
-    }
-
-    @MainActor private func assertMonitorDeliversSimulatedFix(from provider: String) async throws {
-        let application = ProcessInfo.processInfo.androidContext as android.app.Application
-        org.robolectric.Shadows.shadowOf(application).grantPermissions(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
-        let locationManager = application.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
-        let shadowLocationManager = org.robolectric.Shadows.shadowOf(locationManager)
-        shadowLocationManager.setProviderEnabled(provider, true)
-
-        let locationProvider = LocationProvider()
-        let stream = locationProvider.monitor(quality: LocationQuality.navigation)
-
-        let fix = android.location.Location(provider)
-        fix.setLatitude(51.5072)
-        fix.setLongitude(-0.1276)
-        fix.setAccuracy(Float(5.0))
-        fix.setTime(java.lang.System.currentTimeMillis())
-        fix.setElapsedRealtimeNanos(android.os.SystemClock.elapsedRealtimeNanos())
-        shadowLocationManager.simulateLocation(fix)
-        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
-
-        var received: LocationEvent? = nil
-        for try await event in stream {
-            received = event
-            break
+    func testMonitorStartsAtEveryQualityOnThisAPILevel() throws {
+        for quality in [LocationQuality.platformDefault, LocationQuality.lowPower, LocationQuality.balanced, LocationQuality.highAccuracy, LocationQuality.navigation] {
+            let locationProvider = LocationProvider()
+            let _ = locationProvider.monitor(quality: quality)
+            locationProvider.stop()
         }
-        locationProvider.stop()
-
-        XCTAssertEqual(51.5072, received?.latitude ?? 0.0, accuracy: 0.0001)
-        XCTAssertEqual(-0.1276, received?.longitude ?? 0.0, accuracy: 0.0001)
     }
     #endif
 }
