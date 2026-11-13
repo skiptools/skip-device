@@ -116,4 +116,14 @@ final class SkipDeviceTests: XCTestCase {
         let location = try await lp.fetchCurrentLocation()
         XCTAssertNotEqual(0.0, location.latitude)
     }
+
+    #if SKIP
+    func testMonitorStartsAtEveryQualityOnThisAPILevel() throws {
+        for quality in [LocationQuality.platformDefault, LocationQuality.lowPower, LocationQuality.balanced, LocationQuality.highAccuracy, LocationQuality.navigation] {
+            let locationProvider = LocationProvider()
+            let _ = locationProvider.monitor(quality: quality)
+            locationProvider.stop()
+        }
+    }
+    #endif
 }
