@@ -122,8 +122,8 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
     /// ``fetchCurrentLocation(quality:)``, so both paths honour `quality` identically.
     ///
     /// `LocationRequest.Builder`, `setQuality`, `setMinUpdateIntervalMillis` and
-    /// `LocationManager.FUSED_PROVIDER` are all API 31, which is the floor this file already
-    /// assumed before any of these parameters existed.
+    /// `LocationManager.FUSED_PROVIDER` are all API 31, so only call this behind the
+    /// API check in ``requestLocationUpdates(_:quality:interval:minimumInterval:listener:)``.
     /// https://developer.android.com/reference/android/location/LocationRequest.Builder
     private static func locationRequest(quality: LocationQuality, interval: TimeInterval, minimumInterval: TimeInterval) -> LocationRequest {
         let builder = LocationRequest.Builder(Int64(interval * 1_000.0))
@@ -134,6 +134,38 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             builder.setMinUpdateIntervalMillis(Int64(minimumInterval * 1_000.0))
         }
         return builder.build()
+    }
+
+    /// Starts location updates to `listener`, on every API level the package supports.
+    ///
+    /// On API 31 and later this uses the fused provider with a ``locationRequest(quality:interval:minimumInterval:)``.
+    /// Below API 31, `LocationRequest.Builder` does not exist: touching it throws
+    /// `NoClassDefFoundError`, which the bridge turns into a crash. There the pre-31
+    /// `requestLocationUpdates(provider, minTimeMs, minDistanceM, listener, looper)` is used instead,
+    /// with the GPS provider for accurate requests and the network provider, when the device has
+    /// one, for ``LocationQuality/balanced`` and ``LocationQuality/lowPower``. That overload has no
+    /// quality setting and no separate minimum interval, so `minimumInterval` is ignored there.
+    private static func requestLocationUpdates(_ locationManager: LocationManager, quality: LocationQuality, interval: TimeInterval, minimumInterval: TimeInterval, listener: LocListener) {
+        if android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S {
+            let request = locationRequest(quality: quality, interval: interval, minimumInterval: minimumInterval)
+            locationManager.requestLocationUpdates(LocationManager.FUSED_PROVIDER, request, ProcessInfo.processInfo.androidContext.mainExecutor, listener)
+        } else {
+            let provider = legacyProvider(for: quality, in: locationManager)
+            logger.info("requestLocationUpdates legacy provider=\(provider) sdk=\(android.os.Build.VERSION.SDK_INT)")
+            locationManager.requestLocationUpdates(provider, Int64(interval * 1_000.0), Float(0.0), listener, android.os.Looper.getMainLooper())
+        }
+    }
+
+    private static func legacyProvider(for quality: LocationQuality, in locationManager: LocationManager) -> String {
+        switch quality {
+        case .lowPower, .balanced:
+            if locationManager.getAllProviders().contains(LocationManager.NETWORK_PROVIDER) {
+                return LocationManager.NETWORK_PROVIDER
+            }
+            return LocationManager.GPS_PROVIDER
+        default:
+            return LocationManager.GPS_PROVIDER
+        }
     }
     #endif
 
@@ -160,9 +192,8 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             logger.info("location update: \(location.latitude) \(location.longitude)")
             continuation.yield(with: .success(location))
         })
-        let request = Self.locationRequest(quality: quality, interval: interval, minimumInterval: minimumInterval)
         do {
-            locationManager.requestLocationUpdates(LocationManager.FUSED_PROVIDER, request, ProcessInfo.processInfo.androidContext.mainExecutor, listener!)
+            Self.requestLocationUpdates(locationManager, quality: quality, interval: interval, minimumInterval: minimumInterval, listener: listener!)
         } catch {
             logger.error("error requesting location updates: \(error) ")
             continuation.yield(with: .failure(error))
@@ -269,7 +300,6 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
         // the same call shape `monitor()` uses, which is what buys the quality control.
         // The interval is 0 (as fast as the platform will supply one); we stop after the
         // first fix regardless, so it only governs how quickly that first fix arrives.
-        let request = Self.locationRequest(quality: quality, interval: 0.0, minimumInterval: 0.0)
         let location = suspendCancellableCoroutine { continuation in
             locationListener.callback = {
                 locationManager.removeUpdates(locationListener)
@@ -282,7 +312,7 @@ public final class LocationProvider: NSObject, @unchecked Sendable {
             }
 
             logger.info("locationManager.requestLocationUpdates (single-shot)")
-            locationManager.requestLocationUpdates(android.location.LocationManager.FUSED_PROVIDER, request, context.mainExecutor, locationListener)
+            Self.requestLocationUpdates(locationManager, quality: quality, interval: 0.0, minimumInterval: 0.0, listener: locationListener)
         }
         let _ = locationListener // need to hold the reference so it doesn't get gc'd
         return location
